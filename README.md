@@ -94,3 +94,13 @@ npm run build        # 构建
 - 所有跨进程消息结构定义在 `@blm/protocol`，边界处用 Zod 校验
 - 引擎细节（SDK 会话、原生工具名）只存在于服务端
 - 所有会话/项目访问均做 `user_id` 归属校验
+
+## ☕ 赞助支持
+
+如果小蜻蜓对你有帮助，欢迎请作者喝杯咖啡~
+
+<p align="center">
+  <img src="docs/sponsor/wechat.png" alt="微信赞赏码" width="280" />
+  <br/>
+  <sub>微信赞赏</sub>
+</p>
