@@ -1,0 +1,68 @@
+/* ---------- 设置面板：左侧 tab 分页 ---------- */
+.dialog.settings {
+  width: 640px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 64px);
+}
+
+.settings-body {
+  display: flex;
+  gap: 16px;
+  min-height: 320px;
+  max-height: calc(100vh - 220px);
+}
+
+.settings-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 120px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding-right: 8px;
+}
+
+.settings-tab {
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.settings-tab:hover {
+  background: var(--panel-2);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.settings-tab.active {
+  background: var(--panel-2);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.settings-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-pane.hidden {
+  display: none;
+}
+
+.settings-content input[type="range"] {
+  padding: 0;
+  background: none;
+  border: none;
+}

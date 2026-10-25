@@ -1,0 +1,47 @@
+/* ---------- 情绪表情 ---------- */
+
+/* mouth: exactly one shape visible per emotion */
+.dfly .mouth path, .dfly .mouth circle, .dfly .mouth ellipse { opacity: 0; }
+.dfly .m-dot { opacity: 1; }
+.dfly .m-smile, .dfly .m-frown, .dfly .m-oh, .dfly .m-flat { fill: none; }
+
+.dfly.ex-happy .m-dot, .dfly.ex-sad .m-dot, .dfly.ex-surprised .m-dot,
+.dfly.ex-curious .m-dot, .dfly.ex-serious .m-dot { opacity: 0; }
+.dfly.ex-happy .m-smile { opacity: 1; }
+.dfly.ex-sad .m-frown { opacity: 1; }
+.dfly.ex-surprised .m-oh { opacity: 1; }
+.dfly.ex-serious .m-flat { opacity: 1; }
+/* talking mouth: the ellipse is sized per-frame from the live TTS audio
+   (real lip-sync — see DragonflyLogo.tsx), so it replaces whichever shape
+   the current emotion would show. */
+.dfly.st-speaking .mouth path, .dfly.st-speaking .mouth circle { opacity: 0; }
+.dfly.st-speaking .mouth .m-talk { opacity: 1; }
+
+/* eye shapes per emotion */
+.dfly .eyeL, .dfly .eyeR { transition: transform 0.25s ease; }
+.dfly.ex-happy .eyeL, .dfly.ex-happy .eyeR { transform: scaleY(0.42); }
+.dfly.ex-sad .eyeL, .dfly.ex-sad .eyeR { transform: scaleY(0.62) translateY(2px); }
+.dfly.ex-surprised .eyeL, .dfly.ex-surprised .eyeR { transform: scale(1.1); }
+.dfly.ex-curious { transform-box: view-box; transform-origin: 100px 100px; }
+.dfly.ex-curious .dfly-all { transform: rotate(4deg); }
+.dfly.ex-curious .eyeL { transform: scaleY(0.5); }
+
+/* brows appear for sad / curious */
+.dfly .brow { opacity: 0; transition: opacity 0.2s ease; }
+.dfly.ex-sad .brow { opacity: 1; }
+.dfly.ex-curious .browL { opacity: 1; }
+
+/* spark/tint layers should not block emotion shapes */
+.dfly.ex-happy .hl, .dfly.ex-sad .hl { opacity: 0.4; }
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-dot.ok { background: #3ec46d; }
+.status-dot.warn { background: #e0b84c; }
+.status-dot.bad { background: var(--danger); }

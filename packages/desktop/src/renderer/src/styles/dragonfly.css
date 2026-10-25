@@ -1,0 +1,65 @@
+/* ---------- 小蜻蜓动态 Logo（状态化 + 情绪表情） ---------- */
+/* hero container: top of the sidebar, ~1/5 of its height */
+.dfly-hero {
+  height: 20%;
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+/* in-place avatar switcher — makes the 形象 choice discoverable without
+   digging through 设置 */
+.avatar-switch {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(76, 141, 255, 0.14);
+  border-color: rgba(76, 141, 255, 0.45);
+  color: #9dc0ff;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.dfly-hero:hover .avatar-switch,
+.avatar-switch:focus-visible {
+  opacity: 1;
+}
+.dfly-avatar {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+}
+.dfly-avatar.clickable { cursor: pointer; }
+.dfly-hero .dfly {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+.dfly-status {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-align: center;
+}
+.dfly-status .lit { color: #7fd8ff; }
+.dfly-stop {
+  background: rgba(127, 216, 255, 0.12);
+  border: 1px solid rgba(127, 216, 255, 0.5);
+  color: #7fd8ff;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 2px 12px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+.dfly-stop:hover { background: rgba(127, 216, 255, 0.25); }
+

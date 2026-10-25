@@ -1,0 +1,26 @@
+# systemd 服务样例（不用 Docker 时直接部署）
+# 安装: cp deploy/blm-server.service.sample /etc/systemd/system/blm-server.service
+#       mkdir -p /opt/blm && cp -r 仓库内容 /opt/blm && cd /opt/blm && npm install
+#       systemctl daemon-reload && systemctl enable --now blm-server
+
+[Unit]
+Description=白龙马智能体服务端
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/blm/packages/server
+ExecStart=/usr/bin/npx tsx src/index.ts
+Restart=on-failure
+RestartSec=3
+
+# 环境变量（也可用 EnvironmentFile=/opt/blm/packages/server/.env）
+Environment=PORT=8788
+Environment=HOST=127.0.0.1
+Environment=JWT_SECRET=please-change-me
+Environment=BLMA_USERNAME=admin
+Environment=BLMA_PASSWORD=please-change-me
+Environment=ANTHROPIC_API_KEY=sk-ant-...
+
+[Install]
+WantedBy=multi-user.target

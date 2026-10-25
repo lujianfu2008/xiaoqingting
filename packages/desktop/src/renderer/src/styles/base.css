@@ -1,0 +1,71 @@
+:root {
+  color-scheme: dark;
+  --bg: #101418;
+  --panel: #171c22;
+  --panel-2: #1e242c;
+  --border: #2a323c;
+  --text: #e6eaee;
+  --muted: #8b97a3;
+  --accent: #4c8dff;
+  --accent-2: #3a72d4;
+  --user-bubble: #2b4a75;
+  --danger: #e05d5d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 14px;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.primary:hover {
+  background: var(--accent-2);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+}

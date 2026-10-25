@@ -1,0 +1,63 @@
+/* hover excitement + press wiggle */
+.dfly-hero:hover .dfly { --flap: 0.45s; }
+.dfly-hero:hover .dfly .dfly-all { transform: scale(1.06); }
+.dfly .dfly-all { transform-box: view-box; transform-origin: center; }
+.dfly:active .dfly-all { animation: dfly-wiggle 0.55s ease-in-out; }
+@keyframes dfly-wiggle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(-7deg) scale(1.05, 0.95); }
+  55% { transform: rotate(6deg) scale(0.96, 1.05); }
+  80% { transform: rotate(-3deg) scale(1.02); }
+}
+
+/* wing flutter — pivot at the thorax (100,84) */
+.dfly .wingg {
+  transform-box: view-box;
+  transform-origin: 100px 84px;
+  animation: dfly-flapL var(--flap, 3.2s) ease-in-out infinite;
+}
+.dfly .wingg.wr1,
+.dfly .wingg.wr2 {
+  animation-name: dfly-flapR;
+}
+.dfly .wingg.wr2 { animation-delay: -0.15s; }
+.dfly .wingg.wl2 { animation-delay: -0.15s; }
+
+@keyframes dfly-flapL {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes dfly-flapR {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-6deg); }
+}
+
+/* per-state wing speed */
+.dfly.st-idle { --flap: 3.2s; }
+.dfly.st-thinking { --flap: 0.38s; }
+.dfly.st-speaking { --flap: 0.55s; }
+.dfly.st-listening { --flap: 0.9s; }
+
+/* gentle hover bob while idle */
+.dfly.st-idle .dfly-all { animation: dfly-bob 3.6s ease-in-out infinite; }
+@keyframes dfly-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* antenna sway */
+.dfly .antenna {
+  transform-box: view-box;
+  transform-origin: 100px 56px;
+  animation: dfly-antenna var(--flap, 3.2s) ease-in-out infinite;
+}
+.dfly .antenna.ant-r { animation-name: dfly-antennaR; }
+@keyframes dfly-antenna {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(2.5deg); }
+}
+@keyframes dfly-antennaR {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-2.5deg); }
+}
+

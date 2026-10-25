@@ -1,0 +1,370 @@
+/* layout */
+.app {
+  display: flex;
+  width: 100%;
+}
+
+/* Widths come from App.tsx (dragged splitters, persisted in localStorage);
+   the fallbacks keep the layout sane before the first paint. */
+.sidebar {
+  width: var(--sidebar-w, 260px);
+  min-width: 0;
+  flex: 0 0 auto;
+  position: relative;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+  overflow: hidden;
+}
+
+/* Grab strip between panes: 6px, with a 1px line that lights up on hover. */
+.splitter {
+  flex: 0 0 6px;
+  width: 6px;
+  cursor: col-resize;
+  position: relative;
+  background: var(--bg);
+  touch-action: none;
+  z-index: 5;
+}
+
+/* Horizontal variant (inside the chat column): drag up/down to resize the
+   input bar; the lit line runs horizontally instead. */
+.splitter.row {
+  width: auto;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.splitter.row::after {
+  top: 50%;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 1px;
+}
+
+.splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border);
+}
+
+.splitter:hover::after,
+.splitter.active::after {
+  width: 2px;
+  background: var(--accent);
+}
+
+/* While dragging: no text selection anywhere, and always the resize cursor —
+   including after the pointer runs off the splitter. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.sidebar .brand {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 4px 2px;
+}
+
+/* ---------- 分栏最大化 / 最小化 ---------- */
+
+/* One pane per row: the shared width vars must not apply, or the maximised
+   pane would keep its old width and leave the window half empty. */
+.app.solo .sidebar,
+.app.solo .browser-pane,
+.app.solo .main {
+  width: auto;
+  flex: 1 1 auto;
+  border-right: none;
+}
+
+/* The chat is folded (or expanded over the page), so the page owns everything
+   right of the sidebar rather than keeping its dragged width. */
+.app.fill-right .browser-pane {
+  width: auto;
+  flex: 1 1 auto;
+  border-right: none;
+}
+
+.pane-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Chat has no toolbar, so its tools float in the corner; subdued until the
+   pane is hovered so they never fight with the message text. */
+.pane-tools.floating {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 6;
+  opacity: 0.32;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar:hover > .pane-tools.floating,
+.main:hover > .pane-tools.floating,
+.pane-tools.floating:focus-within {
+  opacity: 1;
+}
+
+/* Same size as the browser-bar buttons these sit next to; the muted colour is
+   the resting state for secondary chrome throughout the app. */
+.pane-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pane-tool:hover {
+  color: var(--text);
+}
+
+.pane-tool .tool-icon {
+  font-size: 13px;
+}
+
+/* Only the browser bar is crowded enough to need the fold: it also carries the
+   page title, URL and the 弹窗 / ✕ buttons. The sidebar's tools get a row of
+   their own, and the chat's float in the corner, so both keep their labels at
+   any pane width. */
+.browser-pane {
+  container-type: inline-size;
+}
+
+@container (max-width: 430px) {
+  .pane-tools .tool-label {
+    display: none;
+  }
+}
+
+/* Collapsed pane: a slim, full-height strip that brings the pane back. */
+.pane-rail {
+  flex: 0 0 34px;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 0;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.pane-rail:hover {
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.pane-rail.right {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+.pane-rail.right:hover {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+.pane-rail .rail-label {
+  writing-mode: vertical-rl;
+  letter-spacing: 3px;
+  font-size: 12px;
+}
+
+.pane-rail .rail-icon {
+  font-size: 13px;
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.session-item:hover {
+  background: var(--panel-2);
+}
+
+.session-item.active {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.session-item .title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item .del {
+  visibility: hidden;
+  border: none;
+  background: none;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.session-item:hover .del {
+  visibility: visible;
+}
+
+.session-item .del:hover {
+  color: var(--danger);
+}
+
+.identity-row {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offline-tip {
+  font-size: 11px;
+  color: var(--danger);
+  flex-shrink: 0;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+}
+
+/* ---------- 内置浏览器左侧分栏（聊天在右） ---------- */
+/* Width is dragged (var) and is the flex basis; shrink is allowed only as a last
+   resort, so a window narrower than all the minimums does not clip the chat. */
+.browser-pane {
+  flex: 0 1 auto;
+  width: var(--browser-w, 55%);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  min-height: 0;
+}
+
+.browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.browser-bar .browser-title {
+  color: var(--text);
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-bar .browser-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.browser-btn {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  /* Without this the page title steals the width and 弹窗 wraps onto two lines,
+     making the bar jump from 36px to 53px. */
+  white-space: nowrap;
+}
+
+/* The page itself is a native WebContentsView painted above this hole. */
+.browser-stage {
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+
+/* While a splitter drag hides the native view, leave the pane with a neutral
+   surface instead of a blank white flash. */
+.browser-stage.suspended {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--panel) 0 10px,
+    var(--panel-2) 10px 20px
+  );
+}
+
+.browser-pane ~ .main {
+  flex: 1 1 0;
+}
+
+/* Shown instead of the pane while the page lives in its own window: gives the
+   user a way back, so 弹窗 is never a one-way trip. Floats over the chat so it
+   does not reflow the split view. */
+.browser-popup-tip {
+  position: fixed;
+  left: calc(var(--sidebar-w, 260px) + 22px);
+  bottom: 96px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}

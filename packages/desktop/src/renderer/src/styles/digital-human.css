@@ -1,0 +1,27 @@
+/* ---------- 数字人（VRM）— 侧栏形象位（比蜻蜓位更高，容纳半身像） ---------- */
+.dfly-hero.dh-hero {
+  height: 34%;
+  min-height: 220px;
+}
+.dh-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+.dh-stage canvas { display: block; }
+.dh-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  pointer-events: none;
+}
+.dh-status.failed { color: var(--danger); }

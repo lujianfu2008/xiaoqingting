@@ -1,0 +1,22 @@
+{
+  "name": "bailongma",
+  "private": true,
+  "version": "0.1.0",
+  "description": "白龙马智能体 — server/desktop monorepo",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w @blm/server",
+    "dev:desktop": "npm run dev -w @blm/desktop",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "^1.13.8",
+    "vosk": "^0.3.39"
+  }
+}

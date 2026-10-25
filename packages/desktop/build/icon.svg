@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#123c5c"/>
+      <stop offset="100%" stop-color="#071e30"/>
+    </radialGradient>
+    <radialGradient id="eye" cx="35%" cy="30%" r="82%">
+      <stop offset="0%" stop-color="#c4f4ff"/>
+      <stop offset="48%" stop-color="#2e9fd8"/>
+      <stop offset="100%" stop-color="#0a3f63"/>
+    </radialGradient>
+    <linearGradient id="wing" x1="100%" y1="0%" x2="0%" y2="60%">
+      <stop offset="0%" stop-color="#a0e6ff" stop-opacity="0.10"/>
+      <stop offset="55%" stop-color="#8cdcff" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#cdf7ff" stop-opacity="0.62"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2fbf6a"/>
+      <stop offset="100%" stop-color="#177a41"/>
+    </linearGradient>
+    <clipPath id="eyeLclip"><circle cx="78" cy="48" r="22"/></clipPath>
+    <clipPath id="eyeRclip"><circle cx="122" cy="48" r="22"/></clipPath>
+  </defs>
+
+  <rect width="200" height="200" rx="44" fill="url(#bg)"/>
+
+  <ellipse cx="54" cy="82" rx="48" ry="10.5" transform="rotate(-26 100 84)" fill="url(#wing)" stroke="rgba(255,255,255,0.40)" stroke-width="0.8"/>
+  <ellipse cx="146" cy="82" rx="48" ry="10.5" transform="rotate(26 100 84)" fill="url(#wing)" stroke="rgba(255,255,255,0.40)" stroke-width="0.8"/>
+  <ellipse cx="56" cy="92" rx="38" ry="8" transform="rotate(-8 100 84)" fill="url(#wing)" stroke="rgba(255,255,255,0.28)" stroke-width="0.6"/>
+  <ellipse cx="144" cy="92" rx="38" ry="8" transform="rotate(8 100 84)" fill="url(#wing)" stroke="rgba(255,255,255,0.28)" stroke-width="0.6"/>
+
+  <path d="M93 56 Q88 44 82 38" fill="none" stroke="#1f8f4e" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="82" cy="38" r="2.8" fill="#4ade80"/>
+  <path d="M107 56 Q112 44 118 38" fill="none" stroke="#1f8f4e" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="118" cy="38" r="2.8" fill="#4ade80"/>
+
+  <circle cx="100" cy="66" r="11" fill="url(#body)"/>
+  <ellipse cx="100" cy="90" rx="10.5" ry="12.5" fill="url(#body)"/>
+  <circle cx="100" cy="90" r="4" fill="#b8f1ff"/>
+  <rect x="96.2" y="100" width="7.6" height="42" rx="3.8" fill="url(#body)"/>
+  <path d="M100 142 L104 162 L100 156.5 L96 162 Z" fill="#177a41"/>
+  <circle cx="100" cy="108" r="2.2" fill="#b8f1ff" opacity="0.85"/>
+  <circle cx="100" cy="118" r="2" fill="#b8f1ff" opacity="0.7"/>
+  <circle cx="100" cy="128" r="1.8" fill="#b8f1ff" opacity="0.55"/>
+
+  <path d="M92 74 Q100 80 108 74" fill="none" stroke="#0a3f63" stroke-width="2.4" stroke-linecap="round"/>
+
+  <circle cx="78" cy="48" r="22" fill="url(#eye)"/>
+  <circle cx="122" cy="48" r="22" fill="url(#eye)"/>
+  <g fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.2">
+    <circle cx="78" cy="48" r="22"/>
+    <circle cx="122" cy="48" r="22"/>
+  </g>
+  <circle cx="70" cy="40" r="4" fill="#ffffff" opacity="0.95"/>
+  <circle cx="114" cy="40" r="4" fill="#ffffff" opacity="0.95"/>
+  <g clip-path="url(#eyeLclip)" fill="#eaffff">
+    <circle cx="84" cy="52" r="2.4"/>
+    <circle cx="77" cy="57" r="1.8"/>
+  </g>
+  <g clip-path="url(#eyeRclip)" fill="#ffffff">
+    <circle cx="116" cy="52" r="2.4"/>
+    <circle cx="122" cy="57" r="1.8"/>
+  </g>
+</svg>

@@ -1,0 +1,32 @@
+# Nginx TLS 反向代理样例 — 服务端唯一需要开放的入站端口（443）
+# 客户端通过 wss(s)/https(s) 访问本域名，后端转发到 Node 服务 (127.0.0.1:8788)
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name blm.example.com;          # 改为你的域名
+
+    ssl_certificate     /etc/letsencrypt/live/blm.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/blm.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8788;
+        proxy_http_version 1.1;
+
+        # WebSocket 升级支持
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 3600s;   # 长连接（流式回复/权限等待）
+        proxy_send_timeout 3600s;
+    }
+}
+
+# HTTP -> HTTPS 跳转
+server {
+    listen 80;
+    server_name blm.example.com;
+    return 301 https://$host$request_uri;
+}

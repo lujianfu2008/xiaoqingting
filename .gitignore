@@ -1,0 +1,28 @@
+node_modules/
+dist/
+out/
+release/
+*.log
+.DS_Store
+
+# ===== 敏感信息：绝不提交 =====
+# 服务端密钥/配置（真实密钥只留在本机）
+.env
+.env.*
+!.env.example
+# 运行时数据（会话历史、用户、加密 API Key、MCP 配置）
+data/
+# Claude Code 本机配置
+.claude/settings.local.json
+# 证书/私钥类（兜底）
+*.pem
+*.key
+
+# ASR 模型权重（体积大，不入库；tokens.txt 词表仍提交）
+*.onnx
+# sherpa-onnx 本地安装包残留（npm 可重新获取）
+*.tgz
+
+# 废弃 vosk 方案残留与构建产物（不入库）
+*.exe
+packages/desktop/index-*.js
