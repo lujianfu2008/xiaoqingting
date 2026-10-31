@@ -66,7 +66,9 @@ const toolNameMap: Record<string, string> = {
   WebFetch: "fetch_url",
   WebSearch: "web_search",
   NotebookEdit: "edit_notebook",
-  Task: "delegate_task",
+  Task: "delegate_task", // 旧名，0.3.x 已更名 Agent（保留兼容）
+  Agent: "delegate_task",
+  ListAgents: "list_agents",
   AskUserQuestion: "ask_user",
   Skill: "use_skill",
 };

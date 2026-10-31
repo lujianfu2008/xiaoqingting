@@ -23,6 +23,9 @@ export const WsPermissionRequest = z.object({
   session_id: z.string(),
   tool_name: z.string(),
   input: z.unknown(),
+  // 请求来源是子代理时带上（客户端弹窗标注「子代理 xx 请求使用 …」）
+  agent_id: z.string().optional(),
+  agent_name: z.string().optional(),
 });
 export type WsPermissionRequest = z.infer<typeof WsPermissionRequest>;
 
@@ -44,6 +47,8 @@ export const WsToolExecRequest = z.object({
     "browser_close",
   ]),
   params: z.record(z.string(), z.unknown()),
+  agent_id: z.string().optional(), // 同 WsPermissionRequest
+  agent_name: z.string().optional(),
 });
 export type WsToolExecRequest = z.infer<typeof WsToolExecRequest>;
 

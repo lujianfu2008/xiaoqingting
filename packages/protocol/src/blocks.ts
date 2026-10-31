@@ -22,6 +22,11 @@ export const ToolCallBlock = z.object({
   id: z.string(),
   tool_name: z.string(), // sanitized, e.g. "read_file"
   input: z.unknown(),
+  // 多 agent 归属（可选）：块由哪个子代理产生。主线程的块不带这些字段，
+  // 旧历史数据天然兼容。
+  agent_id: z.string().optional(), // 子代理定义键（subagentDefs 的 key）
+  agent_name: z.string().optional(), // 子代理中文名，客户端直接展示
+  parent_tool_call_id: z.string().optional(), // 主线程发起委派的 tool_call id
 });
 export type ToolCallBlock = z.infer<typeof ToolCallBlock>;
 
@@ -30,6 +35,9 @@ export const ToolResultBlock = z.object({
   id: z.string(), // matches tool_call id
   content: z.string(),
   is_error: z.boolean(),
+  agent_id: z.string().optional(), // 与 tool_call 同规则
+  agent_name: z.string().optional(),
+  parent_tool_call_id: z.string().optional(),
 });
 export type ToolResultBlock = z.infer<typeof ToolResultBlock>;
 
