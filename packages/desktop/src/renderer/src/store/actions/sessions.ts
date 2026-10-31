@@ -19,6 +19,7 @@ export function createSessionActions(
   | "ownerOnlineOf"
   | "deleteSession"
   | "moveSession"
+  | "renameSession"
   | "setCurrentAgent"
 > {
   return {
@@ -178,6 +179,27 @@ export function createSessionActions(
       }));
       // The work dir (and read scope) follows the session's project.
       void window.blm.setSessionProject(id, projectId);
+    },
+
+    async renameSession(id, title) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/sessions/${id}/title`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ title }),
+        });
+        if (!res.ok) {
+          set({ error: t("sess.renameFail") });
+          return false;
+        }
+        set((s) => ({
+          sessions: s.sessions.map((x) => (x.session_id === id ? { ...x, title } : x)),
+        }));
+        return true;
+      } catch {
+        return false;
+      }
     },
 
     setCurrentAgent(agentId) {

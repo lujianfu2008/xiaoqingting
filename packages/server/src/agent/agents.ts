@@ -28,6 +28,11 @@ const serverSideTools = [
   "AskUserQuestion",
   "ExitPlanMode",
   "SlashCommand",
+  // Newer CLI built-ins that the installed SDK version also ships — kept
+  // listed for prompt hygiene; the canUseTool default-deny gate is the real
+  // enforcement (this list can never be exhaustive as the CLI evolves).
+  "PowerShell",
+  "ToolSearch",
 ];
 // Internal bookkeeping tool that touches nothing server-side; keep it usable
 // and prompt-free.

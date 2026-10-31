@@ -2,8 +2,9 @@ import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { LANGUAGES, menuStrings, resolveLanguage } from "./i18n";
 import { loadSettings, patchSettings, type Language } from "./settings";
 
-// Localized application menu (文件/编辑/视图/窗口/帮助/语言). Electron roles
-// keep every accelerator and native behavior; only labels are overridden.
+// Localized application menu (文件/编辑/视图/窗口/帮助/语言·设置). Electron
+// roles keep every accelerator and native behavior; only labels are overridden.
+// 设置入口在「语言 / 设置」菜单顶部（语言选择的同一菜单），经 IPC 打开渲染端的设置对话框。
 
 export function currentLanguage(): Language {
   return loadSettings().language;
@@ -13,8 +14,8 @@ export function applyAppMenu(): void {
   Menu.setApplicationMenu(buildAppMenu(currentLanguage()));
 }
 
-/** Menu item click → persist + rebuild + tell the renderer (in-app UI i18n). */
-function setLanguage(lang: Language): void {
+/** Menu item click / in-app settings → persist + rebuild + tell the renderer. */
+export function setLanguage(lang: Language): void {
   patchSettings({ language: lang });
   applyAppMenu();
   const resolved = resolveLanguage(lang);
@@ -29,20 +30,7 @@ export function buildAppMenu(langSetting: Language): Menu {
   const template: MenuItemConstructorOptions[] = [
     {
       label: t.file,
-      submenu: [
-        {
-          label: t.settings,
-          accelerator: "CmdOrCtrl+,",
-          click: (_mi, win) => {
-            // Electron types this as BaseWindow; only BrowserWindow has contents.
-            (win as import("electron").BrowserWindow | undefined)?.webContents.send(
-              "blm:menu:open-settings",
-            );
-          },
-        },
-        { type: "separator" },
-        { role: "quit", label: t.quit },
-      ],
+      submenu: [{ role: "quit", label: t.quit }],
     },
     {
       label: t.edit,
@@ -83,12 +71,25 @@ export function buildAppMenu(langSetting: Language): Menu {
     },
     {
       label: t.language,
-      submenu: LANGUAGES.map<MenuItemConstructorOptions>((l) => ({
-        label: l.id === "system" ? t.langFollow : l.label,
-        type: "radio",
-        checked: langSetting === l.id,
-        click: () => setLanguage(l.id),
-      })),
+      submenu: [
+        {
+          label: t.settings,
+          accelerator: "CmdOrCtrl+,",
+          click: (_mi, win) => {
+            // Electron types this as BaseWindow; only BrowserWindow has contents.
+            (win as import("electron").BrowserWindow | undefined)?.webContents.send(
+              "blm:menu:open-settings",
+            );
+          },
+        },
+        { type: "separator" },
+        ...LANGUAGES.map<MenuItemConstructorOptions>((l) => ({
+          label: l.id === "system" ? t.langFollow : l.label,
+          type: "radio",
+          checked: langSetting === l.id,
+          click: () => setLanguage(l.id),
+        })),
+      ],
     },
   ];
 

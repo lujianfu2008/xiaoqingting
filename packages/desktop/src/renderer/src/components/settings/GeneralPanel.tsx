@@ -20,6 +20,8 @@ export function GeneralPanel(): React.JSX.Element {
   const [mode, setMode] = useState<ScopeMode>("workspace");
   const [folders, setFolders] = useState<string[]>([]);
   const [closeAction, setCloseAction] = useState<"quit" | "tray">("quit");
+  // 界面语言（初始值取主进程已解析语言；选「跟随系统」后按原始选择显示）。
+  const [lang, setLang] = useState<"system" | "zh-CN" | "en">("zh-CN");
   const t = useT();
 
   const refreshScope = (): void => {
@@ -33,7 +35,14 @@ export function GeneralPanel(): React.JSX.Element {
   useEffect(() => {
     refreshScope();
     void window.blm.getPrefs().then((p) => setCloseAction(p.closeAction));
+    void window.blm.getLanguage().then((l) => setLang(l === "en" ? "en" : "zh-CN"));
   }, []);
+
+  const changeLang = (v: "system" | "zh-CN" | "en"): void => {
+    setLang(v);
+    // 主进程持久化 + 重建菜单 + 广播 lang-changed（App.tsx 已监听并即时生效）。
+    void window.blm.setLanguage(v);
+  };
 
   const changeCloseAction = (v: "quit" | "tray"): void => {
     setCloseAction(v); // optimistic
@@ -176,6 +185,21 @@ export function GeneralPanel(): React.JSX.Element {
         <label>{t("gen.browser")}</label>
         <div style={{ fontSize: 11, color: "var(--muted)" }}>
           {t("gen.browserHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("gen.lang")}</label>
+        <select
+          value={lang}
+          onChange={(e) => changeLang(e.target.value as "system" | "zh-CN" | "en")}
+        >
+          <option value="system">{t("gen.langSystem")}</option>
+          <option value="zh-CN">中文</option>
+          <option value="en">English</option>
+        </select>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("gen.langHint")}
         </div>
       </div>
 

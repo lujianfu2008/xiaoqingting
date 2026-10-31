@@ -1,8 +1,8 @@
 {
-  "name": "bailongma",
+  "name": "xiaoqingting",
   "private": true,
   "version": "0.1.0",
-  "description": "白龙马智能体 — server/desktop monorepo",
+  "description": "小蜻蜓智能体 — server/desktop monorepo",
   "workspaces": [
     "packages/*"
   ],

@@ -43,6 +43,11 @@ export const config = {
   asrBaseUrl: env("ASR_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
   asrApiKey: env("ASR_API_KEY", process.env.ANTHROPIC_AUTH_TOKEN ?? ""),
   asrModel: env("ASR_MODEL", "glm-asr"),
+  // 官方 MCP Registry（市场搜索代理的上游），自建镜像时可换。
+  mcpRegistryUrl: env("MCP_REGISTRY_URL", "https://registry.modelcontextprotocol.io"),
+  // 专家技能市场清单 URL（JSON：{"skills":[...]}）；空 = 市场搜索不可用，
+  // 安装/粘贴导入不受影响。
+  skillsRegistryUrl: env("SKILLS_REGISTRY_URL", ""),
 };
 
 export function ensureDataDirs(): void {
@@ -52,6 +57,9 @@ export function ensureDataDirs(): void {
   // 公有域项目工作空间（共有知识库文件所在）+ 更新申请记录。
   fs.mkdirSync(path.join(config.dataDir, "public-projects"), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, "update-requests"), { recursive: true });
+  // 专家技能（全局插件目录；用户级在首次安装时按用户名创建）。
+  fs.mkdirSync(path.join(config.dataDir, "skills", "global"), { recursive: true });
+  fs.mkdirSync(path.join(config.dataDir, "skills", "users"), { recursive: true });
   // Neutral engine working dir: the SDK injects its cwd into the model's
   // context, so it must not point at user-specific workspace paths.
   fs.mkdirSync(path.join(config.dataDir, "engine"), { recursive: true });

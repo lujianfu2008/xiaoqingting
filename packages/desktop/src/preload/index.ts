@@ -51,6 +51,9 @@ contextBridge.exposeInMainWorld("blm", {
   },
   // Resolved UI language ("zh-CN" | "en"), for document.documentElement.lang.
   getLanguage: (): Promise<string> => ipcRenderer.invoke("blm:menu:getLanguage"),
+  // In-app language switch: same persistence + broadcast as the native menu.
+  setLanguage: (lang: "system" | "zh-CN" | "en"): Promise<string> =>
+    ipcRenderer.invoke("blm:menu:setLanguage", lang),
   // Local single-login lock: is this account signed in elsewhere on this machine?
   checkLocalLogin: (userOrEid: string): Promise<{ locked: boolean }> =>
     ipcRenderer.invoke("blm:login:check", { user_or_eid: userOrEid }),
@@ -76,6 +79,11 @@ contextBridge.exposeInMainWorld("blm", {
     ipcRenderer.invoke("blm:attachments:preview", { path }),
   markAttachments: (sessionId: string, paths: string[]): Promise<void> =>
     ipcRenderer.invoke("blm:attachments:mark", { session_id: sessionId, paths }),
+  // 会话导出：渲染层拼好 Markdown，主进程弹原生保存框并写盘。
+  exportChat: (
+    req: { default_filename: string; markdown: string },
+  ): Promise<{ saved: boolean; path: string | null; error?: string }> =>
+    ipcRenderer.invoke("blm:chat:export", req),
   // Window-close behavior (✕ = quit or hide to tray).
   getPrefs: (): Promise<{ closeAction: "quit" | "tray" }> =>
     ipcRenderer.invoke("blm:app:getPrefs"),
@@ -104,8 +112,22 @@ contextBridge.exposeInMainWorld("blm", {
   stopSpeaking: (): Promise<void> => ipcRenderer.invoke("blm:tts:stop"),
   listVoices: (): Promise<{ name: string; culture: string }[]> =>
     ipcRenderer.invoke("blm:tts:voices"),
-  transcribeLocalPcm: (pcm: ArrayBuffer): Promise<{ text: string; error?: string }> =>
-    ipcRenderer.invoke("blm:asr:transcribe", pcm),
+  transcribeLocalPcm: (pcm: ArrayBuffer, pauses?: number[]): Promise<{ text: string; error?: string }> =>
+    ipcRenderer.invoke("blm:asr:transcribe", pcm, pauses),
+  // 语音唤醒：词表/灵敏度 → 主进程（重）建 KeywordSpotter；音频块流式喂入；
+  // 命中经 onWakeDetected 回调。focus 把窗口从托盘/最小化拉回前台。
+  wakeConfigure: (
+    words: string[],
+    sensitivity: "low" | "medium" | "high",
+  ): Promise<{ error?: string }> => ipcRenderer.invoke("blm:wake:configure", { words, sensitivity }),
+  wakeChunk: (pcm: ArrayBuffer): void => ipcRenderer.send("blm:wake:chunk", pcm),
+  wakeStop: (): void => ipcRenderer.send("blm:wake:stop"),
+  onWakeDetected: (cb: (keyword: string) => void): (() => void) => {
+    const listener = (_e: unknown, keyword: string): void => cb(keyword);
+    ipcRenderer.on("blm:wake:detected", listener);
+    return () => ipcRenderer.removeListener("blm:wake:detected", listener);
+  },
+  focusWindow: (): Promise<void> => ipcRenderer.invoke("blm:app:focus"),
   browser: {
     state: (): Promise<BrowserState> => ipcRenderer.invoke("blm:browser:state"),
     setBounds: (rect: { x: number; y: number; width: number; height: number }): Promise<void> =>

@@ -1,10 +1,10 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import fs from "node:fs";
-import path from "node:path";
-import { config } from "../config.js";
+import type { McpServerDef } from "@blm/protocol";
+import { mergeMcpServers } from "../mcpConfig.js";
 
-// Built-in in-process tools (SDK MCP server) + user-configured external MCP servers.
+// Built-in in-process tools (SDK MCP server) + configured external MCP servers
+// (global data/mcp.json + per-user remote servers, merged in mcpConfig).
 // The SDK MCP server is created per-session so tools can access that session's workspace.
 
 function createBuiltinServer(_cwd: string) {
@@ -25,23 +25,32 @@ function createBuiltinServer(_cwd: string) {
   });
 }
 
-// Optional external MCP servers from data/mcp.json:
-// { "mcpServers": { "fs": { "type": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] } } }
-function loadExternalServers(): Record<string, unknown> {
-  const file = path.join(config.dataDir, "mcp.json");
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return parsed.mcpServers ?? {};
-  } catch {
-    return {};
+// Optional external MCP servers (see mcpConfig.ts for storage and merging):
+// data/mcp.json        — global, admin-managed (any transport)
+// data/mcp-users.json  — per-user remote (http/sse only)
+// Config changes apply to sessions created afterwards; REST writes dispose the
+// user's idle sessions so the next message picks them up.
+export function buildMcpServers(
+  cwd: string,
+  userId?: string,
+): NonNullable<Options["mcpServers"]> {
+  const servers: NonNullable<Options["mcpServers"]> = {
+    builtin: createBuiltinServer(cwd),
+  };
+  for (const [name, def] of Object.entries(mergeMcpServers(userId).servers)) {
+    if (def.enabled === false) continue;
+    servers[name] = toSdkConfig(def);
   }
+  return servers;
 }
 
-export function buildMcpServers(cwd: string): NonNullable<Options["mcpServers"]> {
-  return {
-    builtin: createBuiltinServer(cwd),
-    ...(loadExternalServers() as NonNullable<Options["mcpServers"]>),
-  };
+function toSdkConfig(def: McpServerDef): NonNullable<Options["mcpServers"]>[string] {
+  if (def.type === "stdio") {
+    return { type: "stdio", command: def.command ?? "", args: def.args, env: def.env };
+  }
+  return def.type === "http"
+    ? { type: "http", url: def.url ?? "", headers: def.headers }
+    : { type: "sse", url: def.url ?? "", headers: def.headers };
 }
 
 // Sanitize engine tool names before they reach the client:
@@ -59,6 +68,7 @@ const toolNameMap: Record<string, string> = {
   NotebookEdit: "edit_notebook",
   Task: "delegate_task",
   AskUserQuestion: "ask_user",
+  Skill: "use_skill",
 };
 
 export function sanitizeToolName(raw: string): string {

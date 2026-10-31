@@ -11,6 +11,8 @@ export function createVoiceActions(
   BlmState,
   | "setAutoRead"
   | "updateVoiceSettings"
+  | "setWakeError"
+  | "setContinuousVoice"
   | "speak"
   | "stopSpeaking"
   | "setExpr"
@@ -32,6 +34,12 @@ export function createVoiceActions(
         localStorage.setItem(LS.voiceSettings, JSON.stringify(voiceSettings));
         return { voiceSettings };
       });
+    },
+    setWakeError(msg) {
+      set({ wakeError: msg });
+    },
+    setContinuousVoice(on) {
+      set({ continuousVoice: on });
     },
 
     speak(text, opts) {

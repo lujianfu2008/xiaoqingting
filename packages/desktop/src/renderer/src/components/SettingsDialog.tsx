@@ -2,20 +2,26 @@ import { useState } from "react";
 import { useT } from "../i18n";
 import { GeneralPanel } from "./settings/GeneralPanel";
 import { LlmPanel } from "./settings/LlmPanel";
+import { McpPanel } from "./settings/McpPanel";
+import { SkillsPanel } from "./settings/SkillsPanel";
 import { VoicePanel } from "./settings/VoicePanel";
 import { AsrPanel } from "./settings/AsrPanel";
+import { AccountPanel } from "./settings/AccountPanel";
 
 // Settings panel, split into left-nav tabs so the (long) form never overflows
 // the window. All voice values persist in localStorage (blm.voiceSettings /
-// blm.autoRead); the LLM config lives on the server.
+// blm.autoRead); the LLM and MCP configs live on the server.
 
-type Tab = "general" | "llm" | "voice" | "asr";
+type Tab = "general" | "llm" | "mcp" | "skills" | "voice" | "asr" | "account";
 
 const TAB_KEYS = [
   { id: "general", key: "set.tabGeneral" },
   { id: "llm", key: "set.tabLlm" },
+  { id: "mcp", key: "set.tabMcp" },
+  { id: "skills", key: "set.tabSkills" },
   { id: "voice", key: "set.tabVoice" },
   { id: "asr", key: "set.tabAsr" },
+  { id: "account", key: "set.tabAccount" },
 ] as const;
 
 export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
@@ -47,11 +53,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             <div className={`settings-pane ${tab === "llm" ? "" : "hidden"}`}>
               <LlmPanel />
             </div>
+            <div className={`settings-pane ${tab === "mcp" ? "" : "hidden"}`}>
+              <McpPanel />
+            </div>
+            <div className={`settings-pane ${tab === "skills" ? "" : "hidden"}`}>
+              <SkillsPanel />
+            </div>
             <div className={`settings-pane ${tab === "voice" ? "" : "hidden"}`}>
               <VoicePanel />
             </div>
             <div className={`settings-pane ${tab === "asr" ? "" : "hidden"}`}>
               <AsrPanel />
+            </div>
+            <div className={`settings-pane ${tab === "account" ? "" : "hidden"}`}>
+              <AccountPanel />
             </div>
           </div>
         </div>

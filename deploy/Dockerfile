@@ -1,13 +1,13 @@
-# 白龙马智能体 — 服务端镜像
+# 小蜻蜓智能体 — 服务端镜像
 # 构建镜像（在仓库根目录）:
-#   docker build -f deploy/Dockerfile -t bailongma-server .
+#   docker build -f deploy/Dockerfile -t xiaoqingting-server .
 # 运行:
-#   docker run -d --name blm -p 8788:8788 \
+#   docker run -d --name xiaoqingting -p 8788:8788 \
 #     -e ANTHROPIC_API_KEY=sk-ant-... \
 #     -e JWT_SECRET=change-me \
 #     -e BLMA_USERNAME=admin -e BLMA_PASSWORD=change-me \
-#     -v blm-data:/app/packages/server/data \
-#     bailongma-server
+#     -v xiaoqingting-data:/app/packages/server/data \
+#     xiaoqingting-server
 
 FROM node:22-slim
 

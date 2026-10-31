@@ -48,6 +48,21 @@ export class AgentManager {
     });
   }
 
+  /** 管理员强制下线：通知并断开该用户的全部连接（区别于禁用）。 */
+  kickUser(userId: string): void {
+    this.conns.dropUser(userId, {
+      type: "error",
+      session_id: null,
+      code: "kicked",
+      message: "您已被管理员强制下线。",
+    });
+  }
+
+  /** 发给某用户的全部连接（注册审核实时提醒等）。离线则为 no-op。 */
+  sendToUser(userId: string, msg: ServerMessage): void {
+    this.conns.broadcast(userId, msg);
+  }
+
   /** Whether the user currently has at least one live WS connection. */
   isOnline(userId: string): boolean {
     return this.conns.isOnline(userId);
@@ -60,6 +75,15 @@ export class AgentManager {
   disposeIdleSessions(userId: string): void {
     for (const [sessionId, session] of this.sessions) {
       if (session.record.user_id !== userId || session.isBusy) continue;
+      session.dispose();
+      this.sessions.delete(sessionId);
+    }
+  }
+
+  /** 全局配置（MCP 服务器等）变更后调用：丢弃所有用户的空闲会话，下一条消息用新配置重建。 */
+  disposeAllIdleSessions(): void {
+    for (const [sessionId, session] of this.sessions) {
+      if (session.isBusy) continue;
       session.dispose();
       this.sessions.delete(sessionId);
     }
@@ -138,6 +162,15 @@ export class AgentManager {
     projectId: string | null,
   ): { ok: true; rec: SessionRecord } | { ok: false; code: "not_found" | "cross_visibility" } {
     return this.registry.moveSession(userId, sessionId, projectId);
+  }
+
+  /** 重命名自己的会话（仅标题；历史与共享状态不变）。 */
+  renameSession(
+    userId: string,
+    sessionId: string,
+    title: string,
+  ): { ok: true; rec: SessionRecord } | { ok: false; code: "not_found" | "forbidden" } {
+    return this.registry.renameSession(userId, sessionId, title);
   }
 
   // ---------- 公有域更新申请 ----------

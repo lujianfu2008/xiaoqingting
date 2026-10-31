@@ -4,4 +4,7 @@ export * from "./ws-client.js";
 export * from "./ws-server.js";
 export * from "./rest.js";
 export * from "./llm.js";
+export * from "./mcp.js";
+export * from "./skills.js";
 export * from "./public.js";
+export * from "./desktop.js";

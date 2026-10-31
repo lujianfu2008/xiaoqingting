@@ -1,8 +1,8 @@
 /* ---------- 小蜻蜓动态 Logo（状态化 + 情绪表情） ---------- */
-/* hero container: top of the sidebar, ~1/5 of its height */
+/* hero container: top of the sidebar, ~15% of its height */
 .dfly-hero {
-  height: 20%;
-  min-height: 112px;
+  height: 15%;
+  min-height: 96px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -30,6 +30,42 @@
 }
 .dfly-hero:hover .avatar-switch,
 .avatar-switch:focus-visible {
+  opacity: 1;
+}
+
+/* 收起形象区的小按钮：左上角常显但低调（形象切换按钮在右上 hover 显示） */
+.hero-collapse {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  z-index: 2;
+  font-size: 11px;
+  padding: 1px 7px;
+  line-height: 1.5;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0.5;
+}
+.hero-collapse:hover {
+  opacity: 1;
+}
+
+/* 收起后留下的细条（点击展开，替代整个形象区） */
+.hero-collapsed {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+.hero-collapsed button {
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 1px 6px;
+  opacity: 0.7;
+}
+.hero-collapsed button:hover {
   opacity: 1;
 }
 .dfly-avatar {

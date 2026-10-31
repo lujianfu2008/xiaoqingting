@@ -6,7 +6,10 @@ import { DragonflyLogo } from "./DragonflyLogo";
 export function LoginDialog(): React.JSX.Element {
   const login = useStore((s) => s.login);
   const register = useStore((s) => s.register);
+  const dismissNotices = useStore((s) => s.dismissNotices);
   const localLock = useStore((s) => s.localLock);
+  const registeredPending = useStore((s) => s.registeredPending);
+  const authNotice = useStore((s) => s.authNotice);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [url, setUrl] = useState(useStore.getState().serverUrl || "http://localhost:8788");
   const [employeeId, setEmployeeId] = useState("");
@@ -19,6 +22,7 @@ export function LoginDialog(): React.JSX.Element {
   const submit = async (): Promise<void> => {
     setBusy(true);
     setErr(null);
+    dismissNotices();
     try {
       const base = url.replace(/\/+$/, "");
       if (mode === "login") await login(base, username.trim(), password);
@@ -29,6 +33,35 @@ export function LoginDialog(): React.JSX.Element {
       setBusy(false);
     }
   };
+
+  // 注册成功但待审核：显示等待审核页，审核通过后才能登录。
+  if (registeredPending) {
+    return (
+      <div className="overlay">
+        <div className="dialog" style={{ minWidth: 360, textAlign: "center" }}>
+          <h2 style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+            <DragonflyLogo size={36} />
+            <span>小蜻蜓</span>
+          </h2>
+          <div style={{ fontSize: 14, margin: "12px 0 6px" }}>{t("li.pendingTitle")}</div>
+          <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.6 }}>
+            {t("li.pendingBody", { name: registeredPending })}
+          </div>
+          <div className="actions">
+            <button
+              className="primary"
+              onClick={() => {
+                dismissNotices();
+                setMode("login");
+              }}
+            >
+              {t("li.backLogin")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overlay">
@@ -73,6 +106,7 @@ export function LoginDialog(): React.JSX.Element {
             {t("li.localLock", { eid: localLock })}
           </div>
         )}
+        {authNotice && <div className="error-text">{authNotice}</div>}
         {err && <div className="error-text">{err}</div>}
         <div className="actions">
           <button
@@ -92,6 +126,7 @@ export function LoginDialog(): React.JSX.Element {
             onClick={() => {
               setMode(mode === "login" ? "register" : "login");
               setErr(null);
+              dismissNotices();
             }}
           >
             {mode === "login" ? t("li.noAccount") : t("li.hasAccount")}

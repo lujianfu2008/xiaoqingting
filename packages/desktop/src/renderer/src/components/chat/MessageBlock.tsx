@@ -1,11 +1,39 @@
+import { useState } from "react";
 import type { Block } from "@blm/protocol";
+import { useT } from "../../i18n";
+
+// hover 复制按钮：点击写入剪贴板，短暂显示「已复制」。
+function CopyButton({ text }: { text: string }): React.JSX.Element {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="del"
+      style={{ position: "absolute", top: 4, right: 4, fontSize: 10, padding: "1px 6px", opacity: 0.75 }}
+      title={t("chat.copy")}
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        });
+      }}
+      onMouseLeave={() => setCopied(false)}
+    >
+      {copied ? t("chat.copied") : t("chat.copy")}
+    </button>
+  );
+}
 
 function ToolResult({ block }: { block: Extract<Block, { kind: "tool_result" }> }): React.JSX.Element {
   return (
-    <div className={`tool-block ${block.is_error ? "error" : ""}`}>
-      {block.is_error ? "⚠ " : "✓ "}
-      {block.content.slice(0, 300)}
-      {block.content.length > 300 ? "…" : ""}
+    <div style={{ position: "relative" }}>
+      <div className={`tool-block ${block.is_error ? "error" : ""}`}>
+        {block.is_error ? "⚠ " : "✓ "}
+        {block.content.slice(0, 300)}
+        {block.content.length > 300 ? "…" : ""}
+      </div>
+      <CopyButton text={block.content} />
     </div>
   );
 }
@@ -15,7 +43,12 @@ switch (block.kind) {
 case "user_text":
 return <UserText text={block.text} />;
 case "text":
-return <div className="msg agent">{block.text}</div>;
+return (
+<div style={{ position: "relative" }}>
+<div className="msg agent">{block.text}</div>
+<CopyButton text={block.text} />
+</div>
+);
 case "tool_call":
 return <div className="tool-block">🔧 {block.tool_name}</div>;
 case "tool_result":

@@ -6,11 +6,18 @@ import {
   nextReconnectDelay,
   resetReconnect,
   resetReconnectAttempt,
+  setClosedByUser,
   setReconnectTimer,
   setSocket,
   currentSocket,
+  startHeartbeat,
+  stopHeartbeat,
+  markSocketAlive,
+  isActiveSocket,
+  failPendingAcks,
 } from "../socket";
 import { handleMessage } from "../messages";
+import { t } from "../../i18n";
 
 export function createConnectionActions(
   set: SetState,
@@ -29,16 +36,55 @@ export function createConnectionActions(
         return;
       }
       resetReconnect();
+      // 主动登录是新会话的开始：复位 logout 置位的标志，恢复断线自动重连。
+      setClosedByUser(false);
       const ws = new WebSocket(`${wsBase(serverUrl)}/ws?token=${encodeURIComponent(token)}`);
       setSocket(ws);
       set({ wsStatus: "connecting" });
 
+      // 断链统一处理：onclose 与心跳判死共用。带陈旧连接守卫；两者都触发时
+      // connect() 的 OPEN/CONNECTING 守卫保证只会真正重连一次。
+      const onLinkDead = (code: number, reason: string): void => {
+        if (!isActiveSocket(ws)) return;
+        stopHeartbeat();
+        set({ wsStatus: "disconnected" });
+        if (isClosedByUser()) return;
+        // 服务端主动拒绝（token 失效/禁用/未过审）：登出回登录屏并说明原因，不再重连。
+        if (code === 4001 || code === 4003 || code === 4004) {
+          get().logout();
+          set({
+            authNotice:
+              code === 4001
+                ? t("li.expired")
+                : code === 4003
+                  ? t("li.disabled")
+                  : reason === "review_rejected"
+                    ? t("li.reviewRejected")
+                    : t("li.reviewPending"),
+          });
+          return;
+        }
+        // 非正常断开：在途消息即刻判定失败（提示 + 文本放回输入框），不等超时。
+        failPendingAcks();
+        const delay = nextReconnectDelay();
+        setReconnectTimer(setTimeout(() => get().connect(), delay));
+      };
+
       ws.onopen = () => {
         resetReconnectAttempt();
         set({ wsStatus: "connected" });
+        startHeartbeat(ws, () => onLinkDead(4000, "heartbeat_timeout"));
         // Sessions live inside project/default spaces and are created
         // explicitly — reconnecting just reloads what exists.
         void get().loadSessions().catch(() => undefined);
+        // 断线期间的输出已落库：重连后重拉当前会话补齐历史，并复位可能
+        // 卡死的 busy（result 恰好在断线窗口里送达时没人清它）。
+        const sid = get().currentSessionId;
+        if (sid) {
+          set((s) => ({ busy: { ...s.busy, [sid]: false } }));
+          // 共享视图保持只读跟进，不重拉（selectSession 会退出 sharedView）。
+          if (!get().sharedView) void get().selectSession(sid).catch(() => undefined);
+        }
         void get().loadProjects().catch(() => undefined);
         // Initial identity/presence snapshot; the WS `presence` events keep it fresh.
         void get().loadMe();
@@ -59,14 +105,15 @@ export function createConnectionActions(
           });
         void get().loadLlmConfig();
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => onLinkDead(ev.code, ev.reason ?? "");
+      ws.onerror = () => {
+        if (!isActiveSocket(ws)) return;
+        stopHeartbeat();
         set({ wsStatus: "disconnected" });
-        if (isClosedByUser()) return;
-        const delay = nextReconnectDelay();
-        setReconnectTimer(setTimeout(() => get().connect(), delay));
       };
-      ws.onerror = () => set({ wsStatus: "disconnected" });
       ws.onmessage = (ev) => {
+        if (!isActiveSocket(ws)) return;
+        markSocketAlive();
         let msg: ServerMessage;
         try {
           msg = JSON.parse(ev.data as string) as ServerMessage;

@@ -18,6 +18,11 @@ export const LS = {
   // Chat pane: input-bar height (px) and message font size (px, Shift+wheel).
   inputHeight: "blm.inputHeight",
   chatFontSize: "blm.chatFontSize",
+  // Sidebar avatar zone dragged with the in-sidebar splitter (px);
+  // absent = follow the CSS defaults (dragonfly 15% / digital human 24%).
+  sidebarAvatarH: "blm.sidebarAvatarH",
+  // Avatar zone collapsed upward ("1") or shown; absent = shown.
+  sidebarAvatarCollapsed: "blm.sidebarAvatarCollapsed",
 } as const;
 
 export function loadVoiceSettings(): VoiceSettings {
@@ -41,7 +46,7 @@ export function saveIdentity(
   token: string,
   username: string,
   employeeId: string,
-  role: "admin" | "user",
+  role: "admin" | "reviewer" | "user",
 ): void {
   localStorage.setItem(LS.serverUrl, serverUrl);
   localStorage.setItem(LS.token, token);

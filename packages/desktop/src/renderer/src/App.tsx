@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore, loadAgents } from "./store";
 import { setLang, useT } from "./i18n";
+import { useWakeWord } from "./useWakeWord";
 import { LS } from "./store/persist";
 import { LoginDialog } from "./components/LoginDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -68,6 +69,8 @@ export default function App(): React.JSX.Element {
   const gateLocalLogin = useStore((s) => s.gateLocalLogin);
   const embedded = useStore((s) => s.browser.open && s.browser.mode === "embedded");
   const t = useT();
+  // 语音唤醒常驻监听（登录后生效；命中 → 提示音 + 拉窗 + blm-wake 事件）。
+  useWakeWord();
 
   // What the user asked for, and what actually fits. Keeping them apart means a
   // temporarily narrow window only squeezes the panes on screen — it never

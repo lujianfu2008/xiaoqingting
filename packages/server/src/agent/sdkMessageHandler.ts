@@ -1,5 +1,6 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { Block, ServerMessage, ToolCallBlock, ToolResultBlock } from "@blm/protocol";
+import type { Block, ServerMessage, ToolCallBlock, ToolResultBlock, Usage } from "@blm/protocol";
+import { config } from "../config.js";
 import { sanitizeToolName } from "./mcp.js";
 import {
   LLM_AUTH_ERROR_MESSAGE,
@@ -13,6 +14,11 @@ export interface MessageSink {
   emitBlocks(blocks: Block[]): void;
   /** Persist the engine's session id so the conversation can be resumed. */
   onEngineSessionId(engineSessionId: string): void;
+  /** One turn's token usage (accumulated by the caller into the session record). */
+  onUsage(usage: Usage): void;
+  /** A turn just finished (result delivered) — the caller uses this to arm the
+   *  idle reaper while the engine loop stays alive between turns. */
+  onTurnEnd?(): void;
 }
 
 /** Translate one raw SDK message into protocol blocks / events. */
@@ -95,13 +101,36 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
 
     case "result": {
       // final text is already delivered via assistant messages
+      // 用量：token 数恒下发；费用仅在 REVEAL_USAGE 开启时给出数值。
+      const raw = message as {
+        usage?: { input_tokens?: unknown; output_tokens?: unknown };
+        total_cost_usd?: unknown;
+      };
+      let usage: Usage | undefined;
+      if (
+        raw.usage &&
+        typeof raw.usage.input_tokens === "number" &&
+        typeof raw.usage.output_tokens === "number"
+      ) {
+        usage = {
+          input_tokens: raw.usage.input_tokens,
+          output_tokens: raw.usage.output_tokens,
+          cost_usd:
+            config.revealUsage && typeof raw.total_cost_usd === "number"
+              ? raw.total_cost_usd
+              : null,
+        };
+      }
+      if (usage) sink.onUsage(usage);
       sink.send({
         type: "result",
         session_id: sid,
         is_error: message.subtype !== "success",
         duration_ms: "duration_ms" in message ? message.duration_ms : undefined,
         num_turns: "num_turns" in message ? message.num_turns : undefined,
+        usage,
       });
+      sink.onTurnEnd?.();
       break;
     }
 

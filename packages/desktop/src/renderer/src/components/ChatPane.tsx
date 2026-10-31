@@ -50,17 +50,33 @@ const streamingText = useStore((s) =>
 currentSessionId ? (s.streaming[currentSessionId] ?? "") : "",
 );
 const busy = useStore((s) => (currentSessionId ? (s.busy[currentSessionId] ?? false) : false));
+const lastUsage = useStore((s) =>
+currentSessionId ? s.usageBySession[currentSessionId] : undefined,
+);
+const totalUsage = useStore(
+(s) => s.sessions.find((x) => x.session_id === s.currentSessionId)?.usage,
+);
 const error = useStore((s) => s.error);
 const voiceSettings = useStore((s) => s.voiceSettings);
+const recWake = useStore((s) => s.recWake);
+const continuousVoice = useStore((s) => s.continuousVoice);
+// 输入框下方的元信息行：信任模式开关（原在侧栏）+ 工号·用户名（原在侧栏页脚）。
+const trustMode = useStore((s) => s.trustMode);
+const setTrustMode = useStore((s) => s.setTrustMode);
+const username = useStore((s) => s.username);
+const employeeId = useStore((s) => s.employeeId);
+const role = useStore((s) => s.role);
 const t = useT();
 const send = useStore((s) => s.send);
 const interrupt = useStore((s) => s.interrupt);
-const [draft, setDraft] = useState("");
+// 草稿放 store：发送失败（ack 超时/断线）时能把文本放回输入框。
+const draft = useStore((s) => s.draft);
+const setDraft = useStore((s) => s.setDraft);
 const [noSessionHint, setNoSessionHint] = useState(false);
 const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
 const [attachHint, setAttachHint] = useState<string | null>(null);
 const fileInputRef = useRef<HTMLInputElement>(null);
-const appendDraft = (text: string): void => setDraft((d) => (d ? d + " " : "") + text);
+const appendDraft = useStore((s) => s.appendDraft);
 const { recording, voiceMsg, toggleRecording } = useVoiceInput(currentSessionId, appendDraft);
 const bottomRef = useRef<HTMLDivElement>(null);
 // Picking a session clears the "no session" hint.
@@ -157,9 +173,12 @@ currentSessionId,
 attachments.map((a) => a.path),
 );
 const lines = attachments.map((a) => `[附件] ${a.name} → ${a.path}`);
-send([text, ...lines].filter(Boolean).join("\n\n"));
+const outgoing = [text, ...lines].filter(Boolean).join("\n\n");
+// send 返回 false = 未发出（断线）：保留草稿和附件，用户可直接重试。
+if (send(outgoing)) {
 setDraft("");
 setAttachments([]);
+}
 };
 return (
 <main
@@ -204,7 +223,9 @@ onReset={() => setInputH(INPUT_H_DEFAULT)}
 {recording && (
 <div className="rec-banner">
 <span className="rec-dot" />
-{voiceSettings.asrAutoSend
+{recWake
+? t(continuousVoice ? "chat.listeningContinuous" : "chat.listeningWake")
+: voiceSettings.asrAutoSend
 ? t("chat.listeningAuto")
 : t("chat.listeningDraft")}
 </div>
@@ -314,6 +335,33 @@ onClick={submit}
 >
 {t("chat.send")}
 </button>
+)}
+</div>
+<div className="input-meta">
+<label title={t("side.trustTip")}>
+<input
+type="checkbox"
+checked={trustMode}
+onChange={(e) => setTrustMode(e.target.checked)}
+/>
+{t("side.trust")}
+</label>
+<span
+className="who"
+title={t("ft.identityTip", { name: username ?? "", eid: employeeId ?? "" })}
+>
+{t("ft.eid", { eid: employeeId ?? "—" })} · {username ?? "—"}
+{role === "admin" && <span className="admin-badge">{t("ft.admin")}</span>}
+</span>
+<span className="grow" />
+{lastUsage && (
+<span className="usage">
+{t("chat.usageLast", { input: lastUsage.input_tokens, output: lastUsage.output_tokens })}
+{lastUsage.cost_usd != null ? ` ${t("chat.usageCost", { cost: lastUsage.cost_usd.toFixed(4) })}` : ""}
+{totalUsage
+? ` · ${t("chat.usageTotal", { input: totalUsage.input_tokens, output: totalUsage.output_tokens })}`
+: ""}
+</span>
 )}
 </div>
 </main>

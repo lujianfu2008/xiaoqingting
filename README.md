@@ -1,7 +1,5 @@
 # 小蜻蜓 Xiaoqingting
 
-> 曾用名：白龙马（bailongma）
-
 基于 Claude Agent SDK 的桌面聊天智能体：**Electron 桌面客户端 + Fastify 服务端**。引擎运行在服务端，文件/命令/浏览器等实际操作通过安全桥接在用户本机执行。
 
 ```

@@ -36,6 +36,7 @@ declare global {
       forgetSession(sessionId: string): Promise<void>;
       onOpenSettings(cb: () => void): () => void;
       getLanguage(): Promise<string>;
+      setLanguage(lang: "system" | "zh-CN" | "en"): Promise<string>;
       checkLocalLogin(userOrEid: string): Promise<{ locked: boolean }>;
       acquireLocalLogin(employeeId: string, username: string): Promise<void>;
       releaseLocalLogin(): Promise<void>;
@@ -58,7 +59,12 @@ declare global {
       ): Promise<{ audio?: Uint8Array; error?: string }>;
       stopSpeaking(): Promise<void>;
       listVoices(): Promise<{ name: string; culture: string }[]>;
-      transcribeLocalPcm(pcm: ArrayBuffer): Promise<{ text: string; error?: string }>;
+      transcribeLocalPcm(pcm: ArrayBuffer, pauses?: number[]): Promise<{ text: string; error?: string }>;
+      wakeConfigure(words: string[], sensitivity: "low" | "medium" | "high"): Promise<{ error?: string }>;
+      wakeChunk(pcm: ArrayBuffer): void;
+      wakeStop(): void;
+      onWakeDetected(cb: (keyword: string) => void): () => void;
+      focusWindow(): Promise<void>;
       pathForFile(file: File): string;
       saveAttachment(
         sessionId: string,
@@ -67,6 +73,10 @@ declare global {
       ): Promise<{ path?: string; error?: string }>;
       previewAttachment(path: string): Promise<{ dataUrl?: string; error?: string }>;
       markAttachments(sessionId: string, paths: string[]): Promise<void>;
+      exportChat(req: {
+        default_filename: string;
+        markdown: string;
+      }): Promise<{ saved: boolean; path: string | null; error?: string }>;
       browser: {
         state(): Promise<BrowserState>;
         setBounds(rect: { x: number; y: number; width: number; height: number }): Promise<void>;

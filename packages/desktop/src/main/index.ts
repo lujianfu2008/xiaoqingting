@@ -1,7 +1,9 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 import { executeLocal } from "./executor";
 import { markAttachments, previewAttachment, saveAttachment } from "./attachments";
+import { ExportChatRequest, type ExportChatResult } from "@blm/protocol";
 import {
   ACCESS_MODES,
   accessScopeState,
@@ -19,7 +21,8 @@ import {
 } from "./executor/projectFolders";
 import { synthesizeSpeech, stopSpeaking, listVoices } from "./tts";
 import { transcribePcm } from "./asr";
-import { applyAppMenu } from "./menu";
+import { configureWake, feedWakeChunk, stopWakeStream } from "./wake";
+import { applyAppMenu, setLanguage } from "./menu";
 import { resolveLanguage } from "./i18n";
 import { currentLanguage } from "./menu";
 import { closeToTray, destroyTray } from "./tray";
@@ -37,6 +40,8 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // 语音唤醒要在窗口隐藏进托盘后持续采音，不能被后台节流。
+      backgroundThrottling: false,
     },
   });
 
@@ -77,7 +82,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   // Required on Windows for Notification toasts (托盘最小化提示).
-  app.setAppUserModelId("com.bailongma.desktop");
+  app.setAppUserModelId("com.xiaoqingting.desktop");
 
   // Localized application menu (语言 switcher rebuilds it live).
   applyAppMenu();
@@ -163,6 +168,27 @@ app.whenReady().then(() => {
     return previewAttachment(args.path);
   });
 
+  // Renderer 侧已拼好 Markdown；这里只负责保存对话框与写盘。
+  // 形状跨进程，必须经 protocol Zod 校验。
+  ipcMain.handle("blm:chat:export", async (_e, args: unknown): Promise<ExportChatResult & { error?: string }> => {
+    const parsed = ExportChatRequest.safeParse(args);
+    if (!parsed.success) return { saved: false, path: null, error: "无效请求" };
+    try {
+      // 清理文件名里的非法字符（保留中文名）。
+      const safe =
+        parsed.data.default_filename.replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 200) || "chat";
+      const r = await dialog.showSaveDialog({
+        defaultPath: safe.endsWith(".md") ? safe : `${safe}.md`,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (r.canceled || !r.filePath) return { saved: false, path: null };
+      await fs.promises.writeFile(r.filePath, parsed.data.markdown, "utf8");
+      return { saved: true, path: r.filePath };
+    } catch (e) {
+      return { saved: false, path: null, error: (e as Error).message };
+    }
+  });
+
   // Renderer marks the paths it is about to send as [附件] lines (files kept
   // at their original location); read_attachment exempts them from the scope.
   ipcMain.handle(
@@ -180,6 +206,14 @@ app.whenReady().then(() => {
   // agent can never change what it is allowed to read). Handlers take an
   // optional project_id: with one, mode means that project's override.
   ipcMain.handle("blm:menu:getLanguage", () => resolveLanguage(currentLanguage()));
+  // 应用内设置切换语言：走与原生菜单同一套持久化 + 广播。
+  ipcMain.handle("blm:menu:setLanguage", (_e, lang: unknown) => {
+    if (lang !== "system" && lang !== "zh-CN" && lang !== "en") {
+      return resolveLanguage(currentLanguage());
+    }
+    setLanguage(lang);
+    return resolveLanguage(lang);
+  });
 
   // Local single-login lock: refuse a second simultaneous login of the same
   // account in another instance of the app on this machine (main/loginLock.ts).
@@ -274,13 +308,38 @@ app.whenReady().then(() => {
 
   // Local offline ASR: renderer sends 16kHz mono int16 PCM from the mic;
   // recognition runs in a standalone-Node child process (see asr.ts).
-  ipcMain.handle("blm:asr:transcribe", async (_e, pcm: ArrayBuffer) => {
+  ipcMain.handle("blm:asr:transcribe", async (_e, pcm: ArrayBuffer, pauses?: number[]) => {
     if (!(pcm instanceof ArrayBuffer)) return { text: "", error: "无效音频数据" };
     try {
-      return { text: await transcribePcm(pcm) };
+      return { text: await transcribePcm(pcm, Array.isArray(pauses) ? pauses : undefined) };
     } catch (e) {
       return { text: "", error: e instanceof Error ? e.message : "语音识别失败" };
     }
+  });
+
+  // 语音唤醒（wake.ts）：渲染端经门控后流式喂麦克风块，KeywordSpotter 在
+  // 这里解码，命中即回推 blm:wake:detected。
+  ipcMain.handle(
+    "blm:wake:configure",
+    (_e, args: { words?: unknown; sensitivity?: unknown }) => {
+      if (!args || !Array.isArray(args.words)) return { error: "无效请求" };
+      const words = args.words.filter((w): w is string => typeof w === "string");
+      const sensitivity =
+        args.sensitivity === "low" || args.sensitivity === "high" ? args.sensitivity : "medium";
+      return configureWake(words, sensitivity);
+    },
+  );
+  ipcMain.on("blm:wake:chunk", (event, pcm: ArrayBuffer) => {
+    if (pcm instanceof ArrayBuffer) feedWakeChunk(pcm, event.sender);
+  });
+  ipcMain.on("blm:wake:stop", () => stopWakeStream());
+  // 唤醒后把窗口从托盘/最小化拉回前台再开始语音输入。
+  ipcMain.handle("blm:app:focus", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
   });
 
   createWindow();

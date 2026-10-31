@@ -4,8 +4,13 @@ import { DragonflyLogo, type DflyState } from "../DragonflyLogo";
 import { DigitalHuman } from "../DigitalHuman";
 
 // Sidebar hero: the avatar stage, the in-place avatar switcher and the status /
-// stop-reading line underneath.
-export function SidebarAvatar(): React.JSX.Element {
+// stop-reading line underneath. `style` lets the sidebar pin a dragged height
+// (inline overrides the class's 15%/24% + min-height); undefined = CSS default.
+// `onCollapse` renders the 收起 chevron inside the hero's top-left corner.
+export function SidebarAvatar(props: {
+  style?: React.CSSProperties;
+  onCollapse?: () => void;
+}): React.JSX.Element {
   const thinking = useStore((s) => Object.values(s.busy).some(Boolean));
   const speaking = useStore((s) => s.speaking);
   const expr = useStore((s) => s.expr);
@@ -34,7 +39,19 @@ export function SidebarAvatar(): React.JSX.Element {
   const otherName = avatarMode === "digitalhuman" ? t("av.dfly") : t("av.dh");
 
   return (
-    <div className={avatarMode === "digitalhuman" ? "dfly-hero dh-hero" : "dfly-hero"}>
+    <div
+      className={avatarMode === "digitalhuman" ? "dfly-hero dh-hero" : "dfly-hero"}
+      style={props.style}
+    >
+      {props.onCollapse && (
+        <button
+          className="hero-collapse"
+          title={t("side.collapseAvatar")}
+          onClick={props.onCollapse}
+        >
+          ⌃
+        </button>
+      )}
       <button
         className="avatar-switch"
         title={t("av.switchTip", { cur: avatarName, other: otherName })}

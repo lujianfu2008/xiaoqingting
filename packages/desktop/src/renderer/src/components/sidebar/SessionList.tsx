@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import type { ProjectMeta, SessionMeta } from "@blm/protocol";
+import type { Block, ProjectMeta, SessionMeta } from "@blm/protocol";
 import { useStore } from "../../store";
+import { apiBase } from "../../store/http";
 import { useT } from "../../i18n";
+import { blocksToMarkdown } from "../../lib/exportMarkdown";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 
 // My sessions grouped by project (default space last), then shared (read-only)
@@ -21,7 +23,47 @@ function SessionRow({
 }): React.JSX.Element {
   const selectSession = useStore((sel) => sel.selectSession);
   const deleteSession = useStore((sel) => sel.deleteSession);
+  const renameSession = useStore((sel) => sel.renameSession);
   const t = useT();
+  // 行内重命名：编辑态时标题变输入框（Enter/blur 提交，Esc 取消，空标题不提交）。
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const startRename = (): void => {
+    setDraft(s.title);
+    setEditing(true);
+  };
+  const commitRename = (): void => {
+    const title = draft.trim();
+    setEditing(false);
+    if (title && title !== s.title) void renameSession(s.session_id, title);
+  };
+  // 导出为 Markdown：优先用内存 blocks，没加载过先拉一次历史。
+  const exportSession = async (): Promise<void> => {
+    const st = useStore.getState();
+    let blocks = st.blocksBySession[s.session_id];
+    if (!blocks) {
+      try {
+        const res = await fetch(`${apiBase(st.serverUrl)}/api/sessions/${s.session_id}/messages`, {
+          headers: { Authorization: `Bearer ${st.token}` },
+        });
+        if (!res.ok) {
+          useStore.setState({ error: t("sess.exportFail") });
+          return;
+        }
+        blocks = (await res.json()) as Block[];
+      } catch {
+        useStore.setState({ error: t("sess.exportFail") });
+        return;
+      }
+    }
+    const markdown = blocksToMarkdown(s, blocks);
+    const r = await window.blm.exportChat({
+      default_filename: `${s.title}.md`,
+      markdown,
+    });
+    if (r.saved && r.path) useStore.setState({ error: t("sess.exported", { path: r.path }) });
+    else if (r.error) useStore.setState({ error: r.error });
+  };
   return (
     <div
       className={`session-item ${active ? "active" : ""}`}
@@ -35,7 +77,46 @@ function SessionRow({
           : undefined
       }
     >
-      <span className="title">{s.title}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "1px 4px" }}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename();
+            if (e.key === "Escape") setEditing(false);
+          }}
+        />
+      ) : (
+        <span className="title">{s.title}</span>
+      )}
+      {!editing && (
+        <button
+          className="del"
+          title={t("sess.rename")}
+          onClick={(e) => {
+            e.stopPropagation();
+            startRename();
+          }}
+        >
+          ✏️
+        </button>
+      )}
+      {!editing && (
+        <button
+          className="del"
+          title={t("sess.export")}
+          onClick={(e) => {
+            e.stopPropagation();
+            void exportSession();
+          }}
+        >
+          ⬇
+        </button>
+      )}
       <button
         className="del"
         title={
@@ -208,6 +289,13 @@ export function SessionList({
   } | null>(null);
   // Which project's settings dialog is open (null = none).
   const [settingsFor, setSettingsFor] = useState<ProjectMeta | null>(null);
+  // 会话搜索（纯客户端）：命中标题或共享会话的 owner。
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matchSession = (s: SessionMeta): boolean =>
+    !q ||
+    s.title.toLowerCase().includes(q) ||
+    (s.owner ?? "").toLowerCase().includes(q);
 
   // 公有域项目单独分区展示（工作空间在服务端，而非本机文件夹）。
   const personalProjects = projects.filter((p) => p.visibility !== "public");
@@ -217,6 +305,7 @@ export function SessionList({
   const def: SessionMeta[] = [];
   const known = new Set(projects.map((p) => p.project_id));
   for (const s of sessions) {
+    if (!matchSession(s)) continue;
     if (s.project_id && known.has(s.project_id)) {
       const arr = byProject.get(s.project_id) ?? [];
       arr.push(s);
@@ -225,6 +314,13 @@ export function SessionList({
       def.push(s); // default space, incl. orphaned project ids
     }
   }
+  // 只在搜索时隐藏空分组（没有命中会话的项目不显示）；平时新项目 0 个会话也要显示。
+  const emptyGroup = (p: ProjectMeta): boolean => (byProject.get(p.project_id) ?? []).length === 0;
+  const visiblePersonal = q ? personalProjects.filter((p) => !emptyGroup(p)) : personalProjects;
+  const visiblePublic = q ? publicProjects.filter((p) => !emptyGroup(p)) : publicProjects;
+  const visibleShared = sharedSessions.filter(matchSession);
+  const nothingVisible =
+    q !== "" && visiblePersonal.length === 0 && visiblePublic.length === 0 && def.length === 0 && visibleShared.length === 0;
 
   const menuSession = moveMenu
     ? sessions.find((s) => s.session_id === moveMenu.sessionId)
@@ -236,7 +332,14 @@ export function SessionList({
 
   return (
     <>
-      {personalProjects.map((p) => (
+      <input
+        value={query}
+        placeholder={t("sess.searchPh")}
+        style={{ margin: "0 8px 4px", fontSize: 12, padding: "3px 8px", width: "auto" }}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+
+      {visiblePersonal.map((p) => (
         <ProjectGroup
           key={p.project_id}
           project={p}
@@ -247,10 +350,10 @@ export function SessionList({
         />
       ))}
 
-      {publicProjects.length > 0 && (
+      {visiblePublic.length > 0 && (
         <div style={groupHeaderStyle}>{t("proj.publicSection")}</div>
       )}
-      {publicProjects.map((p) => (
+      {visiblePublic.map((p) => (
         <ProjectGroup
           key={p.project_id}
           project={p}
@@ -294,12 +397,18 @@ export function SessionList({
         />
       ))}
 
-      {sharedSessions.length > 0 && (
+      {nothingVisible && (
+        <div style={{ margin: "6px 8px", fontSize: 12, color: "var(--muted)" }}>
+          {t("sess.noMatch")}
+        </div>
+      )}
+
+      {visibleShared.length > 0 && (
         <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", padding: "0 8px" }}>
           {t("sess.sharedHeader")}
         </div>
       )}
-      {sharedSessions.map((s) => {
+      {visibleShared.map((s) => {
         const online = s.owner ? (presence[s.owner] ?? s.owner_online ?? false) : false;
         return (
           <div

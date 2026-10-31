@@ -1,5 +1,5 @@
 import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
-import type { Block, ServerMessage } from "@blm/protocol";
+import type { Block, ServerMessage, Usage } from "@blm/protocol";
 import { config } from "../config.js";
 import type { Store, SessionRecord, ProjectRecord } from "../store.js";
 import { isPublicAdmin } from "../users.js";
@@ -16,6 +16,10 @@ export interface SessionEvents {
   send(msg: ServerMessage): void;
   /** Whether the session owner (who must approve local actions) is connected. */
   isOwnerOnline?: () => boolean;
+  /** Called once on dispose（空闲回收/引擎循环退出）so the holder can drop it
+   *  from its session map — a dead session left in the map would silently
+   *  swallow every later message pushed into its queue. */
+  onDispose?: () => void;
 }
 
 export class AgentSession {
@@ -29,6 +33,7 @@ export class AgentSession {
   private disposed = false;
   private busy = false;
   private idleTimer: NodeJS.Timeout | null = null;
+  private onDispose?: () => void;
   private requests: ClientRequests;
 
   constructor(
@@ -40,6 +45,7 @@ export class AgentSession {
     this.record = record;
     this.store = store;
     this.events = events;
+    this.onDispose = events.onDispose;
     this.role = getRole(record.agent_id);
     this.requests = new ClientRequests(record.session_id, events, () => this.disposed);
   }
@@ -100,6 +106,8 @@ export class AgentSession {
           send: (msg) => this.events.send(msg),
           emitBlocks: (blocks) => this.emitBlocks(blocks),
           onEngineSessionId: (engineSessionId) => this.persistEngineSessionId(engineSessionId),
+          onUsage: (usage) => this.recordUsage(usage),
+          onTurnEnd: () => this.scheduleIdleClose(),
         });
       }
     } catch (err) {
@@ -117,12 +125,29 @@ export class AgentSession {
       console.error(`[session ${this.record.session_id}] agent loop error:`, raw);
     } finally {
       this.busy = false;
-      this.scheduleIdleClose();
+      // 引擎循环已退出（空闲回收/出错/子进程结束）：立即自毁并经 onDispose
+      // 从持有方的 Map 摘除。否则会话变僵尸，后续消息推进死队列被静默吞掉；
+      // 摘除后下一条消息按 engine_session_id resume 重建，上下文不丢。
+      this.dispose();
     }
   }
 
   private persistEngineSessionId(engineSessionId: string): void {
     this.record.engine_session_id = engineSessionId;
+    this.store.saveSession(this.record);
+  }
+
+  /** 累计本会话 token 用量（每条回复一次，随 record 落库并出现在会话 meta）。 */
+  private recordUsage(usage: Usage): void {
+    const prev = this.record.usage;
+    this.record.usage = {
+      input_tokens: (prev?.input_tokens ?? 0) + usage.input_tokens,
+      output_tokens: (prev?.output_tokens ?? 0) + usage.output_tokens,
+      cost_usd:
+        prev?.cost_usd != null || usage.cost_usd != null
+          ? (prev?.cost_usd ?? 0) + (usage.cost_usd ?? 0)
+          : null,
+    };
     this.store.saveSession(this.record);
   }
 
@@ -137,6 +162,7 @@ export class AgentSession {
   // ---------- public API ----------
 
   sendUserMessage(text: string): void {
+    if (this.disposed) return; // 已回收：持有方经 onDispose 摘除后会新建，不应走到这里
     this.start();
     this.touch();
     this.turnQueue.push(text);
@@ -166,6 +192,8 @@ export class AgentSession {
     this.requests.failAll();
     this.abort.abort();
     this.turnQueue.end();
+    // 通知持有方把自己从会话表摘掉，防止僵尸会话吞掉后续消息。
+    this.onDispose?.();
   }
 
   get isBusy(): boolean {
@@ -179,6 +207,8 @@ export class AgentSession {
     this.idleTimer = null;
   }
 
+  /** Turn finished: reap the engine after SESSION_IDLE_MS of silence
+   *  (cancelled by the next sendUserMessage via touch()). */
   private scheduleIdleClose(): void {
     this.touch();
     this.idleTimer = setTimeout(() => this.dispose(), config.sessionIdleMs);

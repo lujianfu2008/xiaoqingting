@@ -1,4 +1,4 @@
-appId: com.bailongma.desktop
+appId: com.xiaoqingting.desktop
 productName: 小蜻蜓
 # 安装包文件名用 ASCII，避免中文名在下载/传输环节出问题
 artifactName: xqt-setup-${version}.${ext}

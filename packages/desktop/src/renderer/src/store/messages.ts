@@ -1,6 +1,7 @@
 import type { ServerMessage } from "@blm/protocol";
 import { normalizeExpr } from "../components/DragonflyLogo";
 import { autoExecIfTrusted } from "./actions/chat";
+import { clearSendAck } from "./socket";
 import { t } from "../i18n";
 import type { BlmState, GetState, SetState } from "./types";
 
@@ -17,6 +18,8 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       break;
 
     case "message_block":
+      // 自己发出的 user_text 回到界面上 = 服务端已收到，解除发送确认。
+      if (msg.block.kind === "user_text") clearSendAck(msg.session_id);
       set((s) => ({
         blocksBySession: {
           ...s.blocksBySession,
@@ -61,6 +64,27 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       set((s) => ({
         busy: { ...s.busy, [msg.session_id]: false },
         streaming: { ...s.streaming, [msg.session_id]: "" },
+        // 本回复用量 + 会话累计（服务端落库；本地同步累加避免整表刷新）。
+        usageBySession: msg.usage
+          ? { ...s.usageBySession, [msg.session_id]: msg.usage }
+          : s.usageBySession,
+        sessions: msg.usage
+          ? s.sessions.map((x) =>
+              x.session_id === msg.session_id
+                ? {
+                    ...x,
+                    usage: {
+                      input_tokens: (x.usage?.input_tokens ?? 0) + msg.usage!.input_tokens,
+                      output_tokens: (x.usage?.output_tokens ?? 0) + msg.usage!.output_tokens,
+                      cost_usd:
+                        x.usage?.cost_usd != null || msg.usage!.cost_usd != null
+                          ? (x.usage?.cost_usd ?? 0) + (msg.usage!.cost_usd ?? 0)
+                          : null,
+                    },
+                  }
+                : x,
+            )
+          : s.sessions,
       }));
       // Fallback: reply ended without an emotion tag → a small happy nod
       if (get().expr === "normal") get().setExpr("happy", 1800);
@@ -71,6 +95,12 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       if (msg.code === "account_disabled") {
         get().logout();
         set({ error: t("li.disabled") });
+        break;
+      }
+      // 被管理员强制下线（账号未禁用，可重新登录）。
+      if (msg.code === "kicked") {
+        get().logout();
+        set({ authNotice: t("li.kicked") });
         break;
       }
       set((s) => ({
@@ -131,6 +161,11 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
           ),
         }));
       }
+      break;
+
+    case "review_request":
+      // 新注册待审核（或上线补推）：更新角标数。
+      set({ pendingReviewCount: msg.pending });
       break;
 
     case "presence":

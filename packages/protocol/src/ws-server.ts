@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Block } from "./blocks.js";
-import { SessionMeta } from "./sessions.js";
+import { SessionMeta, Usage } from "./sessions.js";
 import { UpdateRequestView } from "./public.js";
 
 // ---------- Server -> Client (WebSocket) ----------
@@ -53,6 +53,9 @@ export const WsResult = z.object({
   is_error: z.boolean(),
   duration_ms: z.number().optional(),
   num_turns: z.number().optional(),
+  // Per-turn token usage; cost_usd is null unless the server has
+  // REVEAL_USAGE=true. Tokens are always reported.
+  usage: Usage.optional(),
 });
 
 export const WsError = z.object({
@@ -90,6 +93,13 @@ export const WsUpdateRequestDecided = z.object({
 });
 export type WsUpdateRequestDecided = z.infer<typeof WsUpdateRequestDecided>;
 
+// 注册审核：新用户注册时推给在线管理员/审核员；连接建立时补推当前待审数量。
+export const WsReviewRequest = z.object({
+  type: z.literal("review_request"),
+  pending: z.number(),
+});
+export type WsReviewRequest = z.infer<typeof WsReviewRequest>;
+
 export const ServerMessage = z.discriminatedUnion("type", [
   WsMessageDelta,
   WsMessageBlock,
@@ -102,5 +112,6 @@ export const ServerMessage = z.discriminatedUnion("type", [
   WsPong,
   WsUpdateRequest,
   WsUpdateRequestDecided,
+  WsReviewRequest,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;

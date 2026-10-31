@@ -1,13 +1,22 @@
 import type { FastifyInstance } from "fastify";
 import {
+  ChangePasswordRequest,
   CreateProjectRequest,
   CreateSessionRequest,
   MoveSessionRequest,
+  RenameSessionRequest,
   ShareSessionRequest,
 } from "@blm/protocol";
 import type { AgentManager } from "../agent/AgentManager.js";
 import { listRoles } from "../agent/agents.js";
-import { listUsers, getEmployeeId, isPublicAdmin, getUserRecord } from "../users.js";
+import {
+  listUsers,
+  getEmployeeId,
+  isPublicAdmin,
+  getRole,
+  getUserRecord,
+  changePassword,
+} from "../users.js";
 
 // Identity, agents and session CRUD/sharing endpoints.
 
@@ -22,8 +31,19 @@ export function registerSessionRoutes(
   app.get("/api/me", (req) => ({
     username: req.userId,
     employee_id: getEmployeeId(req.userId),
-    role: isPublicAdmin(req.userId) ? "admin" : "user",
+    role: getRole(req.userId),
   }));
+
+  // 本人修改密码：验证旧密码；成功后此前签发的 token 全部失效（需重新登录）。
+  app.post("/api/me/password", (req, reply) => {
+    const parsed = ChangePasswordRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const result = changePassword(req.userId, parsed.data.old_password, parsed.data.new_password);
+    if (result === "bootstrap") return reply.code(400).send({ error: "bootstrap_password_env" });
+    if (result === "bad_credentials") return reply.code(403).send({ error: "bad_credentials" });
+    if (result === "not_found") return reply.code(404).send({ error: "not_found" });
+    return { ok: true };
+  });
 
   app.get("/api/sessions", (req) => manager.listSessions(req.userId));
 
@@ -117,6 +137,19 @@ export function registerSessionRoutes(
     return { session_id: result.rec.session_id, project_id: result.rec.project_id ?? null };
   });
 
+  // 重命名自己的会话（仅标题）。
+  app.post("/api/sessions/:id/title", (req, reply) => {
+    const parsed = RenameSessionRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const result = manager.renameSession(req.userId, (req.params as { id: string }).id, parsed.data.title);
+    if (!result.ok) {
+      return reply
+        .code(result.code === "forbidden" ? 403 : 404)
+        .send({ error: result.code });
+    }
+    return { session_id: result.rec.session_id, title: result.rec.title };
+  });
+
   // Knowledge sharing: toggle sharing of one of my sessions, optionally
   // restricted to a list of usernames (empty/absent list = everyone).
   app.post("/api/sessions/:id/share", (req, reply) => {
@@ -135,7 +168,7 @@ export function registerSessionRoutes(
   app.get("/api/users", () => ({
     users: listUsers().map((u) => ({
       ...u,
-      role: isPublicAdmin(u.username) ? ("admin" as const) : ("user" as const),
+      role: getRole(u.username),
       disabled: getUserRecord(u.username)?.disabled ?? false,
       online: manager.isOnline(u.username),
     })),

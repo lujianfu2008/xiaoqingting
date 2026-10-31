@@ -7,6 +7,8 @@ import { registerAdminRoutes } from "./adminRoutes.js";
 import { registerUpdateRequestRoutes } from "./updateRequestRoutes.js";
 import { registerLlmRoutes } from "./llmRoutes.js";
 import { registerAsrRoutes } from "./asrRoutes.js";
+import { registerMcpRoutes } from "./mcpRoutes.js";
+import { registerSkillRoutes } from "./skillRoutes.js";
 
 // Composes the REST surface. Auth goes first because it also installs the JWT
 // onRequest hook that protects every route registered after it.
@@ -17,12 +19,14 @@ export function registerRoutes(
   store: Store,
 ): void {
   void store; // kept for the existing call signature in index.ts
-  registerAuthRoutes(app);
+  registerAuthRoutes(app, manager);
   registerSessionRoutes(app, manager);
   registerAdminRoutes(app, manager);
   registerUpdateRequestRoutes(app, manager);
   registerLlmRoutes(app, manager);
   registerAsrRoutes(app);
+  registerMcpRoutes(app, manager);
+  registerSkillRoutes(app, manager);
 }
 
 // Fastify request augmentation

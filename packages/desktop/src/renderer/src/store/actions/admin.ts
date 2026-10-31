@@ -1,4 +1,4 @@
-import type { AdminUserDetail, UpdateRequestView } from "@blm/protocol";
+import type { AdminUserDetail, AuditEntry, UpdateRequestView } from "@blm/protocol";
 import type { BlmState, GetState, SetState } from "../types";
 import { apiBase } from "../http";
 import { t } from "../../i18n";
@@ -16,6 +16,11 @@ export function createAdminActions(
   | "listAdminUsers"
   | "setUserRole"
   | "setUserDisabled"
+  | "listReviewUsers"
+  | "decideReviewUser"
+  | "resetUserPassword"
+  | "kickUser"
+  | "loadAuditLog"
 > {
   // 非 2xx → 转成提示并返回 false（immutable_account 是内置管理员的预期拒绝）。
   const okOrToast = async (res: Response): Promise<boolean> => {
@@ -110,6 +115,82 @@ export function createAdminActions(
           },
         );
         return await okOrToast(res);
+      } catch {
+        return false;
+      }
+    },
+
+    async listReviewUsers() {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/review/users`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return [];
+        const data = (await res.json()) as { users: AdminUserDetail[] };
+        return data.users;
+      } catch {
+        return [];
+      }
+    },
+
+    async decideReviewUser(username, approve) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/review/users/${encodeURIComponent(username)}/decide`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ approve }),
+          },
+        );
+        return await okOrToast(res);
+      } catch {
+        return false;
+      }
+    },
+
+    async resetUserPassword(username, password) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/admin/users/${encodeURIComponent(username)}/password`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ password }),
+          },
+        );
+        return await okOrToast(res);
+      } catch {
+        return false;
+      }
+    },
+
+    async kickUser(username) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/admin/users/${encodeURIComponent(username)}/kick`,
+          { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+        );
+        return await okOrToast(res);
+      } catch {
+        return false;
+      }
+    },
+
+    async loadAuditLog(limit = 100) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/audit?limit=${limit}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return false;
+        const data = (await res.json()) as { entries: AuditEntry[] };
+        set({ auditLog: data.entries });
+        return true;
       } catch {
         return false;
       }

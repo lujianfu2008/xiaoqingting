@@ -112,6 +112,21 @@ export class SessionRegistry {
     return { ok: true, rec };
   }
 
+  /** Rename the user's own session (affects title only; history untouched). */
+  renameSession(
+    userId: string,
+    sessionId: string,
+    title: string,
+  ): { ok: true; rec: SessionRecord } | { ok: false; code: "not_found" | "forbidden" } {
+    const rec = this.store.getSession(sessionId);
+    if (!rec) return { ok: false, code: "not_found" };
+    if (rec.user_id !== userId) return { ok: false, code: "forbidden" };
+    rec.title = title;
+    rec.updated_at = new Date().toISOString();
+    this.store.saveSession(rec);
+    return { ok: true, rec };
+  }
+
   deleteSession(userId: string, sessionId: string): boolean {
     if (!this.isOwner(userId, sessionId)) return false;
     this.store.deleteSession(sessionId);

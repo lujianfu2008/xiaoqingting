@@ -4,7 +4,7 @@
 #       systemctl daemon-reload && systemctl enable --now blm-server
 
 [Unit]
-Description=白龙马智能体服务端
+Description=小蜻蜓智能体服务端
 After=network-online.target
 
 [Service]

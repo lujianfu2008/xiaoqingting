@@ -85,16 +85,22 @@ export class MessageRouter {
 
     let session = this.sessions.get(sessionId);
     if (!session) {
-      session = new AgentSession(
+      const created = new AgentSession(
         rec,
         this.store,
         {
           send: (msg) => this.conns.broadcastShared(rec.user_id, sessionId, msg),
           isOwnerOnline: () => this.conns.isOnline(rec.user_id),
+          // 空闲回收/引擎退出时把会话从 Map 摘除：下一条消息走新建 + resume，
+          // 而不是把消息推进死队列被静默吞掉。
+          onDispose: () => {
+            if (this.sessions.get(sessionId) === created) this.sessions.delete(sessionId);
+          },
         },
         this.updateRequests,
       );
-      this.sessions.set(sessionId, session);
+      session = created;
+      this.sessions.set(sessionId, created);
     }
     session.sendUserMessage(text);
   }

@@ -2,6 +2,15 @@ import { z } from "zod";
 
 // ---------- Session / agent metadata ----------
 
+// Token usage for one turn / accumulated for a session. cost_usd is null
+// unless the server runs with REVEAL_USAGE=true.
+export const Usage = z.object({
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+  cost_usd: z.number().nullable(),
+});
+export type Usage = z.infer<typeof Usage>;
+
 export const SessionMeta = z.object({
   session_id: z.string(),
   title: z.string(),
@@ -19,6 +28,8 @@ export const SessionMeta = z.object({
   // Present in shared-session listings: whether the owner currently has a
   // live WS connection (they are the only one who can approve local actions).
   owner_online: z.boolean().optional(),
+  // Accumulated token usage over the whole session (server-side bookkeeping).
+  usage: Usage.optional(),
 });
 export type SessionMeta = z.infer<typeof SessionMeta>;
 

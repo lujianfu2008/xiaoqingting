@@ -9,26 +9,35 @@ import { createSessionActions } from "./actions/sessions";
 import { createProjectActions } from "./actions/projects";
 import { createAdminActions } from "./actions/admin";
 import { createLlmActions } from "./actions/llm";
+import { createMcpActions } from "./actions/mcp";
+import { createSkillActions } from "./actions/skills";
 import { createChatActions } from "./actions/chat";
 import { createVoiceActions } from "./actions/voice";
 import { createBrowserActions } from "./actions/browser";
 
 export type { BlmState, VoiceSettings, WsStatus } from "./types";
 
+const storedRole = localStorage.getItem(LS.role);
+
 export const useStore = create<BlmState>((set, get) => ({
   serverUrl: localStorage.getItem(LS.serverUrl) ?? "",
   token: localStorage.getItem(LS.token),
   username: localStorage.getItem(LS.username),
   employeeId: localStorage.getItem(LS.employeeId),
-  role: localStorage.getItem(LS.role) === "admin" ? "admin" : "user",
+  role: storedRole === "admin" || storedRole === "reviewer" ? storedRole : "user",
   wsStatus: "disconnected",
   error: null,
   localLock: null,
+  registeredPending: null,
+  authNotice: null,
+  wakeError: null,
 
   sessions: [],
   sharedSessions: [],
   projects: [],
   updateRequests: [],
+  auditLog: [],
+  pendingReviewCount: 0,
   presence: {},
   currentSessionId: null,
   sharedView: false,
@@ -37,17 +46,25 @@ export const useStore = create<BlmState>((set, get) => ({
   blocksBySession: {},
   streaming: {},
   busy: {},
+  draft: "",
+  usageBySession: {},
   pendingPermission: null,
   pendingExec: null,
   trustMode: localStorage.getItem(LS.trustMode) === "1",
   autoRead: localStorage.getItem(LS.autoRead) === "1",
   speaking: false,
   recording: false,
+  recWake: false,
+  continuousVoice: false,
   expr: "normal",
   avatarMode:
     localStorage.getItem(LS.avatarMode) === "digitalhuman" ? "digitalhuman" : "dragonfly",
   voiceSettings: loadVoiceSettings(),
   llmConfig: null,
+  mcpServers: null,
+  globalMcpServers: null,
+  skills: null,
+  globalSkills: null,
   browser: { mode: "embedded", open: false, url: "", title: "" },
 
   ...createAuthActions(set, get),
@@ -56,6 +73,8 @@ export const useStore = create<BlmState>((set, get) => ({
   ...createProjectActions(set, get),
   ...createAdminActions(set, get),
   ...createLlmActions(set, get),
+  ...createMcpActions(set, get),
+  ...createSkillActions(set, get),
   ...createChatActions(set, get),
   ...createVoiceActions(set, get),
   ...createBrowserActions(set, get),

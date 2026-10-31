@@ -52,8 +52,10 @@ function loadRecognizer(): boolean {
   }
 }
 
-/** Transcribe raw 16kHz mono int16 PCM. Returns recognized text ("" if none). */
-export function transcribePcm(pcm: ArrayBuffer): string {
+/** Transcribe raw 16kHz mono int16 PCM. Returns recognized text ("" if none).
+ * pauses 是停顿切分点（int16 样本位，渲染端按 ~0.5s 静音检测）：按点分段逐段
+ * 识别再用逗号拼接——说话停顿处落逗号，弥补 Paraformer 整段识别无标点。 */
+export function transcribePcm(pcm: ArrayBuffer, pauses?: number[]): string {
   if (!loadRecognizer()) {
     throw new Error("语音识别引擎未就绪，请重启应用重试");
   }
@@ -63,8 +65,20 @@ export function transcribePcm(pcm: ArrayBuffer): string {
   for (let i = 0; i < len; i++) {
     samples[i] = view.getInt16(i * 2, true) / 32768;
   }
-  const stream = recognizer.createStream();
-  stream.acceptWaveform({ sampleRate: 16000, samples });
-  recognizer.decode(stream);
-  return String(recognizer.getResult(stream).text ?? "").trim();
+  const bounds = [
+    0,
+    ...(pauses ?? []).filter((p) => Number.isFinite(p) && p > 0 && p < len).sort((a, b) => a - b),
+    len,
+  ];
+  const pieces: string[] = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const seg = samples.subarray(bounds[i], bounds[i + 1]);
+    if (seg.length < 1600) continue; // <0.1s 的碎片不送识别
+    const stream = recognizer.createStream();
+    stream.acceptWaveform({ sampleRate: 16000, samples: seg });
+    recognizer.decode(stream);
+    const text = String(recognizer.getResult(stream).text ?? "").trim();
+    if (text) pieces.push(text);
+  }
+  return pieces.join("，");
 }
