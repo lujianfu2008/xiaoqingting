@@ -19,6 +19,7 @@ import type {
   UpdateRequestView,
   Usage,
   UserSummary,
+  UpdateLlmConfigRequest,
   WsPermissionRequest,
   WsToolExecRequest,
 } from "@blm/protocol";
@@ -165,12 +166,7 @@ export interface BlmState {
   loadShared(): Promise<void>;
   ownerOnlineOf(sessionId: string): boolean;
   loadLlmConfig(): Promise<void>;
-  saveLlmConfig(patch: {
-    api_key?: string;
-    base_url?: string;
-    model?: string;
-    protocol?: "anthropic" | "openai";
-  }): Promise<void>;
+  saveLlmConfig(patch: UpdateLlmConfigRequest): Promise<void>;
   clearLlmConfig(): Promise<void>;
   // 网络中继（用户开关在设置面板；管理员配置在管理页）。
   loadMyRelay(): Promise<void>;
