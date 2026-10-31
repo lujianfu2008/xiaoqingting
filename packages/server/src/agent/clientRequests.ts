@@ -55,6 +55,7 @@ export class ClientRequests {
   requestPermission(
     toolName: string,
     input: Record<string, unknown>,
+    agent?: { agent_id: string; agent_name: string },
   ): Promise<{ behavior: "allow" } | { behavior: "deny"; message: string }> {
     const requestId = this.pendingPermissions.nextId();
     this.events.send({
@@ -63,6 +64,7 @@ export class ClientRequests {
       session_id: this.sessionId,
       tool_name: sanitizeToolName(toolName),
       input,
+      ...(agent ?? {}),
     });
     return this.pendingPermissions
       .request(requestId, config.permissionTimeoutMs, { allow: false, timedOut: true })

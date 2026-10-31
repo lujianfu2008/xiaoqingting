@@ -43,6 +43,9 @@ export const config = {
   maxTurns: Number(env("MAX_TURNS", "50")),
   // <= 0 = 不限制（不传给 SDK）。耗尽行为见 sessionOptions/AgentSession。
   maxBudgetUsd: Number(env("MAX_BUDGET_USD", "5")),
+  // 子代理委派闸门：同时在飞委派数 + 每回合委派总次数（回合结束清零）。
+  maxConcurrentSubagents: Number(env("MAX_CONCURRENT_SUBAGENTS", "3")),
+  maxDelegationsPerTurn: Number(env("MAX_DELEGATIONS_PER_TURN", "10")),
   revealUsage: env("REVEAL_USAGE", "false") === "true",
   // Cloud ASR (defaults to the Zhipu BigModel endpoint, reusing the LLM token)
   asrBaseUrl: env("ASR_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),

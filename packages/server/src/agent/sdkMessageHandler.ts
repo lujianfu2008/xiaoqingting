@@ -2,6 +2,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { Block, ServerMessage, ToolCallBlock, ToolResultBlock, Usage } from "@blm/protocol";
 import { config } from "../config.js";
 import { sanitizeToolName } from "./mcp.js";
+import { subagentName } from "./subagents.js";
 import {
   LLM_AUTH_ERROR_MESSAGE,
   isAuthFailureText,
@@ -19,16 +20,55 @@ export interface MessageSink {
   /** A turn just finished (result delivered) — the caller uses this to arm the
    *  idle reaper while the engine loop stays alive between turns. */
   onTurnEnd?(): void;
+  // ---------- 子代理委派记账（回调给 AgentSession 的 DelegationGate） ----------
+  /** 主线程发起委派（Agent 工具 tool_use，canUseTool 放行后到达这里）。 */
+  onDelegateStart?(toolUseId: string, subagentKey: string): void;
+  /** 委派 tool_result 结算（兜底释放；已确认后台的由 task_notification 释放）。 */
+  onDelegateEnd?(toolUseId: string): void;
+  /** task_started 边界：后台确认 + task_id→toolUseId 映射。 */
+  onTaskStarted?(taskId: string, toolUseId: string | undefined, key: string | undefined): void;
+  /** task_notification 边界：委派结算（完成/失败/停止都算）。 */
+  onTaskNotification?(taskId: string, toolUseId: string | undefined): void;
+}
+
+/** SDK 消息的子代理归属 → Block 可选字段子集（主线程消息返回空对象）。 */
+function subagentAttrib(message: {
+  parent_tool_use_id?: string | null;
+  subagent_type?: string;
+}): Pick<ToolCallBlock, "agent_id" | "agent_name" | "parent_tool_call_id"> {
+  const parent = message.parent_tool_use_id ?? null; // undefined 视同主线程（老 CLI）
+  const key = message.subagent_type;
+  if (parent == null && !key) return {};
+  return {
+    ...(key ? { agent_id: key, agent_name: subagentName(key) } : {}),
+    ...(parent != null ? { parent_tool_call_id: parent } : {}),
+  };
 }
 
 /** Translate one raw SDK message into protocol blocks / events. */
 export function handleSdkMessage(message: SDKMessage, sid: string, sink: MessageSink): void {
   switch (message.type) {
-    case "system":
-      if (message.subtype === "init") sink.onEngineSessionId(message.session_id);
+    case "system": {
+      const m = message as {
+        subtype?: string;
+        session_id?: string;
+        task_id?: string;
+        tool_use_id?: string;
+        subagent_type?: string;
+      };
+      if (m.subtype === "init") sink.onEngineSessionId(message.session_id);
+      else if (m.subtype === "task_started")
+        sink.onTaskStarted?.(m.task_id ?? "", m.tool_use_id, m.subagent_type);
+      else if (m.subtype === "task_notification")
+        sink.onTaskNotification?.(m.task_id ?? "", m.tool_use_id);
       break;
+    }
 
     case "stream_event": {
+      // 子代理的流式文本不下发：message_delta 无归属字段，混进主线程流会
+      // 串流；且后台子代理的 delta 会在 result 之后「复活」已完结回复的流
+      // 缓冲。== null 判定（undefined 视同主线程）兼容无此字段的老 CLI。
+      if ((message as { parent_tool_use_id?: string | null }).parent_tool_use_id != null) break;
       const ev = (message as { event?: { type?: string; delta?: { type?: string; text?: string } } })
         .event;
       if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
@@ -38,6 +78,7 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
     }
 
     case "assistant": {
+      const attrib = subagentAttrib(message);
       const blocks: Block[] = [];
       let authFailure = false;
       for (const part of message.message.content) {
@@ -49,6 +90,9 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
             authFailure = true;
             continue;
           }
+          // 子代理文本默认不上时间线（TextBlock 无归属字段；SDK 的
+          // forwardSubagentText=false 也本就不转发）——保留错误检测即可。
+          if (attrib.agent_id) continue;
           blocks.push(makeTextBlock(part.text));
         } else if (part.type === "tool_use") {
           blocks.push({
@@ -56,7 +100,14 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
             id: part.id,
             tool_name: sanitizeToolName(part.name),
             input: part.input,
+            ...attrib,
           } satisfies ToolCallBlock);
+          // 主线程发起委派：登记闸门在飞账目（子代理内的 Agent 调用已被
+          // canUseTool 的 agentID 二道锁拒绝，到不了这里）。
+          if (part.name === "Agent" && !attrib.parent_tool_call_id) {
+            const key = (part.input as { subagent_type?: unknown })?.subagent_type;
+            sink.onDelegateStart?.(part.id, typeof key === "string" ? key : "");
+          }
         }
       }
       if (authFailure) {
@@ -72,6 +123,7 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
     }
 
     case "user": {
+      const attrib = subagentAttrib(message);
       const blocks: Block[] = [];
       const content = (message as { message?: { content?: unknown } }).message?.content;
       if (Array.isArray(content)) {
@@ -91,7 +143,11 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
               id: tr.tool_use_id ?? "",
               content: stringifyToolContent(tr.content),
               is_error: tr.is_error ?? false,
+              ...attrib,
             } satisfies ToolResultBlock);
+            // 委派兜底结算：已确认后台的委派由 task_notification 释放，这里
+            // 只兜老 CLI 无 task 事件的场景（前台委派的 tool_result=真结束）。
+            sink.onDelegateEnd?.(tr.tool_use_id ?? "");
           }
         }
       }

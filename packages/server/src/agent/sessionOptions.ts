@@ -10,11 +10,43 @@ import { clientProxyEntry, clientToolQualifiedNames, type ExecSink } from "./cli
 import { createPublicServer, publicToolQualifiedNames } from "./publicTools.js";
 import type { RunAction } from "./clientTools/shared.js";
 import { sessionSkillSetup } from "../skillsConfig.js";
+import { subagentName } from "./subagents.js";
 
 export type PermissionDecider = (
   toolName: string,
   input: Record<string, unknown>,
+  agent?: { agent_id: string; agent_name: string },
 ) => Promise<{ behavior: "allow" } | { behavior: "deny"; message: string }>;
+
+/**
+ * 子代理委派闸门：入参校验 + 并发/频次上限。由 AgentSession 创建持有
+ * （生命周期随会话），canUseTool 在放行 Agent 工具前裁决；task_started/
+ * task_notification 消息驱动在飞记账（回调见 sdkMessageHandler）。
+ */
+export interface DelegationGate {
+  /** 放行前裁决：ok=放行；否则拒绝分类（次数/并发满=cap、类型未知、远端隔离）。 */
+  tryStart(
+    input: Record<string, unknown>,
+    allowedKeys: string[],
+    toolUseId: string,
+  ): "ok" | "cap" | "unknown_type" | "remote";
+  /** task_id → 子代理 key 查询（审批弹窗标注请求来源子代理）。 */
+  keyForTask(taskId: string): string | undefined;
+  /** task_started 边界：登记在飞委派的后台确认与 task_id 映射。 */
+  markTaskStarted(
+    taskId: string,
+    toolUseId: string | undefined,
+    key: string | undefined,
+  ): void;
+  /** task_notification 边界：委派结算（完成/失败/停止都算），释放在飞占用。 */
+  releaseTask(taskId: string): void;
+  /** 委派 tool_result 结算（老 CLI 无 task 事件时的兜底释放；已确认后台的不在此释放）。 */
+  releaseToolUse(toolUseId: string): void;
+  /** 回合结束：清零每回合委派计数（在飞占用跨回合保留——后台子代理活得比回合久）。 */
+  resetTurn(): void;
+  /** 当前在飞委派数（空闲回收联动用）。 */
+  readonly inFlight: number;
+}
 
 /** 公有域会话上下文：存在时文件工具走服务端 public 执行器（role 已经 toPublicRole 变换）。 */
 export interface PublicSessionCtx {
@@ -35,6 +67,7 @@ export function buildSessionOptions(
   execSink: ExecSink,
   abortController: AbortController,
   requestPermission: PermissionDecider,
+  delegationGate: DelegationGate,
   publicCtx?: PublicSessionCtx,
 ): Options {
   const llm = getUserLlmConfig(record.user_id);
@@ -128,7 +161,7 @@ export function buildSessionOptions(
     // 和回合看门狗兜底失控循环。
     ...(budgetCap > 0 ? { maxBudgetUsd: budgetCap } : {}),
     abortController,
-    canUseTool: (toolName, input) => {
+    canUseTool: (toolName, input, options) => {
       // Client-proxied tools are confirmed by the client itself before
       // execution — auto-allow here to avoid double prompting. Public
       // workspace tools likewise (审批门在 write_file 工具体内). Skill 只注入
@@ -148,14 +181,59 @@ export function buildSessionOptions(
       // 曾漏出角色的禁用名单）——按「非白名单即拒绝」兜底，防止内建工具把
       // 服务器环境变量读进模型上下文（其中含用户 LLM key）。
       if (!toolName.startsWith("mcp__")) {
+        // 精确豁口：主线程委派子代理。仅配置了 agents 的角色放行，且：
+        // - options.agentID 非空 = 已在子代理上下文——二道锁直接拒绝，防止
+        //   孙子代理（即使子代理 tools 白名单配错也委派不出去）；
+        // - isolation:"remote" 会把子代理放进远端云环境，脱离「一切执行在
+        //   用户本机」的模型，拒绝（worktree 落在服务端中立 engine 目录内，
+        //   仅占磁盘，放行）；
+        // - subagent_type 必须属于角色配置的键集；并发/频次由闸门裁决。
+        if (
+          (toolName === "Agent" || toolName === "ListAgents") &&
+          effectiveRole.agents &&
+          Object.keys(effectiveRole.agents).length > 0
+        ) {
+          const keys = Object.keys(effectiveRole.agents);
+          if (toolName === "ListAgents") {
+            return Promise.resolve({ behavior: "allow" as const });
+          }
+          if (options.agentID) {
+            return Promise.resolve({
+              behavior: "deny" as const,
+              message:
+                "子代理不能再委派其他子代理。请把调研或执行结论直接写进你自己的报告。",
+            });
+          }
+          const gate = delegationGate.tryStart(input, keys, options.toolUseID);
+          if (gate === "ok") {
+            return Promise.resolve({ behavior: "allow" as const });
+          }
+          return Promise.resolve({
+            behavior: "deny" as const,
+            message:
+              gate === "cap"
+                ? `并行子代理已达上限（${config.maxConcurrentSubagents} 个）或本回合委派次数已用完（${config.maxDelegationsPerTurn} 次），请等待当前委派完成后再发起新的。`
+                : gate === "remote"
+                  ? "不支持在远端云环境运行子代理，请在用户本机完成该任务。"
+                  : `未知的 subagent_type，可用值：${keys.join("、")}。`,
+          });
+        }
         return Promise.resolve({
           behavior: "deny" as const,
           message:
             "此为引擎内部工具，已被禁用。请改用可用的本机工具（run_command/read_file/write_file/browser_* 等）或外部 MCP 工具完成同样的操作。",
         });
       }
-      // 外部 MCP 工具（mcp__<server>__<tool>）仍走用户确认。
-      return requestPermission(toolName, input);
+      // 外部 MCP 工具（mcp__<server>__<tool>）仍走用户确认；请求若来自子代理，
+      // 带上归属（客户端弹窗标注「子代理 xx 请求使用 …」）。
+      const agentKey = options.agentID
+        ? delegationGate.keyForTask(options.agentID)
+        : undefined;
+      return requestPermission(
+        toolName,
+        input,
+        agentKey ? { agent_id: agentKey, agent_name: subagentName(agentKey) } : undefined,
+      );
     },
     resume: record.engine_session_id ?? undefined,
     env: engineEnv,

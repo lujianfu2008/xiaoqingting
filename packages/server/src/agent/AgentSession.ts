@@ -5,7 +5,7 @@ import type { Store, SessionRecord, ProjectRecord } from "../store.js";
 import { isPublicAdmin } from "../users.js";
 import { getRole, toPublicRole, type AgentRole } from "./agents.js";
 import { TurnQueue } from "./TurnQueue.js";
-import { buildSessionOptions, type PublicSessionCtx } from "./sessionOptions.js";
+import { buildSessionOptions, type DelegationGate, type PublicSessionCtx } from "./sessionOptions.js";
 import { createPublicRun } from "./publicTools.js";
 import { handleSdkMessage } from "./sdkMessageHandler.js";
 import { LLM_AUTH_ERROR_MESSAGE, isAuthFailureText, isBudgetExhaustedText } from "./sdkText.js";
@@ -20,6 +20,82 @@ export interface SessionEvents {
    *  from its session map — a dead session left in the map would silently
    *  swallow every later message pushed into its queue. */
   onDispose?: () => void;
+}
+
+// ---------- 子代理委派闸门 ----------
+// 在飞记账两条释放路径：task_notification（正路；确认后台后 tool_result 不再
+// 释放）与委派 tool_result（兜底，兼容无 task 事件的老 CLI）。次数上限按回合
+// 清零；并发占用跨回合保留（后台子代理活得比回合久）。若某后台委派的
+// task_notification 因引擎异常缺失，占用会泄漏到会话 dispose——代价只是并发
+// 上限少一格，可接受。
+
+class DelegationGateImpl implements DelegationGate {
+  private flight = new Map<string, { key: string; taskId?: string; backgrounded?: boolean }>();
+  private byTask = new Map<string, string>(); // task_id → toolUseId
+  private turnCount = 0;
+
+  get inFlight(): number {
+    return this.flight.size;
+  }
+
+  tryStart(
+    input: Record<string, unknown>,
+    allowedKeys: string[],
+    toolUseId: string,
+  ): "ok" | "cap" | "unknown_type" | "remote" {
+    const key = typeof input.subagent_type === "string" ? input.subagent_type : "";
+    if (!key || !allowedKeys.includes(key)) return "unknown_type";
+    if ((input as { isolation?: unknown }).isolation === "remote") return "remote";
+    if (this.turnCount >= config.maxDelegationsPerTurn) return "cap";
+    if (this.flight.size >= config.maxConcurrentSubagents) return "cap";
+    this.turnCount++;
+    this.flight.set(toolUseId, { key });
+    return "ok";
+  }
+
+  keyForTask(taskId: string): string | undefined {
+    const tid = this.byTask.get(taskId);
+    return tid ? this.flight.get(tid)?.key : undefined;
+  }
+
+  markTaskStarted(
+    taskId: string,
+    toolUseId: string | undefined,
+    key: string | undefined,
+  ): void {
+    if (!toolUseId) return;
+    const e = this.flight.get(toolUseId);
+    if (!e) return; // 未知委派（resume 前的旧账等）——不追踪
+    e.taskId = taskId;
+    e.backgrounded = true;
+    if (key && !e.key) e.key = key;
+    this.byTask.set(taskId, toolUseId);
+  }
+
+  releaseTask(taskId: string): void {
+    const tid = this.byTask.get(taskId);
+    if (!tid) return;
+    this.byTask.delete(taskId);
+    this.flight.delete(tid);
+  }
+
+  releaseToolUse(toolUseId: string): void {
+    const e = this.flight.get(toolUseId);
+    if (!e || e.backgrounded) return;
+    if (e.taskId) this.byTask.delete(e.taskId);
+    this.flight.delete(toolUseId);
+  }
+
+  resetTurn(): void {
+    this.turnCount = 0;
+  }
+
+  /** 安全网：canUseTool 放行过的委派理论上已在账，这里兜重复登记/漏账。 */
+  ensure(toolUseId: string, key: string): void {
+    if (!key || this.flight.has(toolUseId)) return;
+    if (this.flight.size >= config.maxConcurrentSubagents) return;
+    this.flight.set(toolUseId, { key });
+  }
 }
 
 export class AgentSession {
@@ -37,6 +113,7 @@ export class AgentSession {
   private turnActive = false;
   private onDispose?: () => void;
   private requests: ClientRequests;
+  private gate = new DelegationGateImpl();
 
   constructor(
     record: SessionRecord,
@@ -62,7 +139,8 @@ export class AgentSession {
       this.role,
       this.requests.execSink,
       this.abort,
-      (toolName, input) => this.requests.requestPermission(toolName, input),
+      (toolName, input, agent) => this.requests.requestPermission(toolName, input, agent),
+      this.gate,
       publicCtx,
     );
     this.q = query({ prompt: this.turnQueue, options });
@@ -116,9 +194,15 @@ export class AgentSession {
             // 在引擎循环存活期间一直为 true，配置变更永远跳过热会话。）
             this.busy = this.turnQueue.pending > 0;
             this.turnActive = false;
+            this.gate.resetTurn();
             this.disarmWatchdog();
             this.scheduleIdleClose();
           },
+          onDelegateStart: (toolUseId, key) => this.gate.ensure(toolUseId, key),
+          onDelegateEnd: (toolUseId) => this.gate.releaseToolUse(toolUseId),
+          onTaskStarted: (taskId, toolUseId, key) =>
+            this.gate.markTaskStarted(taskId, toolUseId, key),
+          onTaskNotification: (taskId) => this.gate.releaseTask(taskId),
         });
         // 回合有动静（任何 SDK 消息）就续期看门狗；回合结束则解除。
         if (this.turnActive) this.armWatchdog();
@@ -234,8 +318,20 @@ export class AgentSession {
    *  (cancelled by the next sendUserMessage via touch()). */
   private scheduleIdleClose(): void {
     this.touch();
-    this.idleTimer = setTimeout(() => this.dispose(), config.sessionIdleMs);
+    this.idleTimer = setTimeout(() => this.idleCloseCheck(), config.sessionIdleMs);
     this.idleTimer.unref();
+  }
+
+  /** 到期回收：有在飞委派（后台子代理）时不回收——后台子代理活得比回合久，
+   *  静默不代表工作结束；30s 后复查，全部结算后才真正 dispose。 */
+  private idleCloseCheck(): void {
+    if (this.disposed) return;
+    if (this.gate.inFlight > 0) {
+      this.idleTimer = setTimeout(() => this.idleCloseCheck(), 30_000);
+      this.idleTimer.unref();
+      return;
+    }
+    this.dispose();
   }
 
   // ---------- turn watchdog ----------

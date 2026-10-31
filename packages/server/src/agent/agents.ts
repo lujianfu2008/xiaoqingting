@@ -1,6 +1,7 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentInfo } from "@blm/protocol";
 import { CLIENT_TOOL_NAMES } from "./clientTools/index.js";
+import { buildAgentsOption } from "./subagents.js";
 
 // Agent roles ("智能体角色"). Each role maps to engine query options.
 // The client only sees AgentInfo — engine-specific details never leave the server.
@@ -24,7 +25,9 @@ const serverSideTools = [
   "Grep",
   "WebFetch",
   "WebSearch",
-  "Task",
+  "Task", // 旧名，SDK 0.3.x 已更名 Agent；保留以防别名回归
+  "Agent", // 内建子代理委派工具：默认禁用，配了子代理的角色在 withSubagents 里移出
+  "ListAgents",
   "AskUserQuestion",
   "ExitPlanMode",
   "SlashCommand",
@@ -90,7 +93,40 @@ export interface AgentRole {
   agents?: Options["agents"];
 }
 
-export const agentRoles: Record<string, AgentRole> = {
+// 委派指引段：withSubagents 追加到角色 append 尾部；toPublicRole 必须剥离
+// （公有域会话没有委派能力，指引留在提示词里会诱导模型调用不存在的工具）。
+// 追加在 localOpsPrompt 之后，不破坏 toPublicRole 对 localOpsPrompt 的字面替换。
+const delegationGuidance =
+  "你可以把合适的子任务委派给子代理并行处理（Agent 工具，subagent_type 见可用智能体列表）。" +
+  "每个子代理只交给一个边界清晰的任务，在 prompt 里写明目标、涉及路径与期望产出；" +
+  "子代理默认后台运行，其报告会随后作为工具结果返回，由你核对并汇总给用户。" +
+  "子代理里的敏感操作仍会向用户弹出确认；不要为了琐碎小事委派。";
+
+/**
+ * 给角色接入子代理：填充 agents 选项（经 buildAgentsOption 只收表内 key）、
+ * 把 Agent/ListAgents 移出禁用名单（否则模型看不到委派工具）、append 委派指引。
+ */
+export function withSubagents(role: AgentRole, keys: string[]): AgentRole {
+  const sys = role.systemPrompt as {
+    type: "preset";
+    preset: "claude_code";
+    append: string;
+  };
+  return {
+    ...role,
+    agents: buildAgentsOption(keys),
+    disallowedTools: (role.disallowedTools ?? []).filter(
+      (t) => t !== "Agent" && t !== "ListAgents",
+    ),
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: sys.append + delegationGuidance,
+    },
+  };
+}
+
+const baseRoles: Record<string, AgentRole> = {
   assistant: {
     id: "assistant",
     name: "通用助手",
@@ -145,6 +181,13 @@ export const agentRoles: Record<string, AgentRole> = {
   },
 };
 
+export const agentRoles: Record<string, AgentRole> = {
+  ...baseRoles,
+  // 接入子代理的角色（writer 只读不接；公有域会话由 toPublicRole 硬排除）。
+  assistant: withSubagents(baseRoles.assistant, ["researcher", "coder"]),
+  coder: withSubagents(baseRoles.coder, ["researcher"]),
+};
+
 export function getRole(id: string): AgentRole {
   return agentRoles[id] ?? agentRoles.assistant;
 }
@@ -170,10 +213,14 @@ export function toPublicRole(role: AgentRole): AgentRole {
   };
   return {
     ...role,
+    // 公有域没有本机 client 代理工具，子代理会拿到错误的工具预期——硬排除。
+    agents: undefined,
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: sys.append.replace(localOpsPrompt, publicOpsPrompt),
+      append: sys.append
+        .replace(localOpsPrompt, publicOpsPrompt)
+        .replace(delegationGuidance, ""),
     },
     allowedTools: [...publicFileTools, ...keepTools],
     disallowedTools: [...serverSideTools, ...clientTools],
