@@ -57,6 +57,7 @@ const totalUsage = useStore(
 (s) => s.sessions.find((x) => x.session_id === s.currentSessionId)?.usage,
 );
 const error = useStore((s) => s.error);
+const wsStatus = useStore((s) => s.wsStatus);
 const voiceSettings = useStore((s) => s.voiceSettings);
 const recWake = useStore((s) => s.recWake);
 const continuousVoice = useStore((s) => s.continuousVoice);
@@ -73,6 +74,7 @@ const interrupt = useStore((s) => s.interrupt);
 const draft = useStore((s) => s.draft);
 const setDraft = useStore((s) => s.setDraft);
 const [noSessionHint, setNoSessionHint] = useState(false);
+const [busyHint, setBusyHint] = useState(false);
 const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
 const [attachHint, setAttachHint] = useState<string | null>(null);
 const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,6 +85,10 @@ const bottomRef = useRef<HTMLDivElement>(null);
 useEffect(() => {
 if (currentSessionId) setNoSessionHint(false);
 }, [currentSessionId]);
+// The "still busy" hint only makes sense while busy — clear it with the state.
+useEffect(() => {
+if (!busy) setBusyHint(false);
+}, [busy]);
 // Switching sessions drops unsent attachments — they belong to that chat.
 useEffect(() => {
 setAttachments([]);
@@ -158,7 +164,13 @@ setAttachments((a) => (a.some((x) => x.path === p) ? a : [...a, { name, path: p,
 
 const submit = (): void => {
 const text = draft.trim();
-if ((!text && attachments.length === 0) || busy || (sharedView && !ownerOnline)) return;
+if ((!text && attachments.length === 0) || (sharedView && !ownerOnline)) return;
+// 上一条还在生成：明确提示而不是静默吞掉——卡住的 busy（模型挂死等）
+// 曾让用户「怎么发都没反应、没有任何状态」。
+if (busy) {
+setBusyHint(true);
+return;
+}
 // No session selected: the store's send() would silently no-op — tell the
 // user what to do instead, and keep the draft so nothing is lost.
 if (!currentSessionId) {
@@ -230,9 +242,21 @@ onReset={() => setInputH(INPUT_H_DEFAULT)}
 : t("chat.listeningDraft")}
 </div>
 )}
+{/* 回合进行中掉线是最容易误读为「智能体不理人」的场景：显式横幅说明
+    正在重连、回复会自动补上（连接状态小圆点太不显眼）。 */}
+{wsStatus !== "connected" && busy && (
+<div className="tool-block" style={{ color: "#e5a83a" }}>
+⚠️ {t("chat.offlineBanner")}
+</div>
+)}
 {noSessionHint && (
 <div className="tool-block" style={{ color: "#e5a83a" }}>
 💡 {t("chat.noSession")}
+</div>
+)}
+{busyHint && (
+<div className="tool-block" style={{ color: "#e5a83a" }}>
+⏳ {t("chat.busyHint")}
 </div>
 )}
 {attachHint && (

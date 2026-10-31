@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProjectMeta } from "@blm/protocol";
 import { useT } from "../../i18n";
+import { Overlay } from "../Overlay";
 
 type ScopeMode = AccessScopeState["mode"];
 
@@ -65,7 +66,7 @@ export function ProjectSettingsDialog({
     t(m === "workspace" ? "gen.modeWsHint" : m === "full" ? "gen.modeFullHint" : "gen.modeCustomHint");
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="dialog" style={{ minWidth: 380 }} onClick={(e) => e.stopPropagation()}>
         <h2>
           {isPublic
@@ -180,6 +181,6 @@ export function ProjectSettingsDialog({
           </button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

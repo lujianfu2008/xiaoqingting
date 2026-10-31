@@ -16,6 +16,8 @@ const MODE_HINTS: Record<ScopeMode, Key> = {
 export function GeneralPanel(): React.JSX.Element {
   const avatarMode = useStore((s) => s.avatarMode);
   const setAvatarMode = useStore((s) => s.setAvatarMode);
+  const avatarVisible = useStore((s) => s.avatarVisible);
+  const setAvatarVisible = useStore((s) => s.setAvatarVisible);
   const [workDir, setWorkDir] = useState<string | null>(null);
   const [mode, setMode] = useState<ScopeMode>("workspace");
   const [folders, setFolders] = useState<string[]>([]);
@@ -216,6 +218,19 @@ export function GeneralPanel(): React.JSX.Element {
           {avatarMode === "digitalhuman"
             ? t("gen.avatarDhHint")
             : t("gen.avatarDflyHint")}
+        </div>
+        <label
+          style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={avatarVisible}
+            onChange={(e) => setAvatarVisible(e.target.checked)}
+          />
+          <span style={{ fontSize: 12 }}>{t("gen.avatarShow")}</span>
+        </label>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("gen.avatarShowHint")}
         </div>
       </div>
     </>

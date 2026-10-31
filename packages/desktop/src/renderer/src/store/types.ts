@@ -8,6 +8,9 @@ import type {
   LlmConfigInfo,
   McpRegistrySearchResponse,
   McpServerDef,
+  MyRelayStatus,
+  RelayConfigInfo,
+  RelayConfigUpdate,
   SkillRegistrySearchResponse,
   McpServerInfo,
   ProjectMeta,
@@ -99,11 +102,14 @@ export interface BlmState {
   continuousVoice: boolean; // 连续对话进行中（免唤醒词自动续听；瞬态，不持久化）
   expr: DflyExpr; // avatar expression driven by the latest reply's emotion tag
   avatarMode: "dragonfly" | "digitalhuman";
+  avatarVisible: boolean; // 形象区默认显隐（设置 → 通用可改，重启后保持）
   llmConfig: LlmConfigInfo | null; // my per-user model settings (key never leaves server)
   mcpServers: McpServerInfo[] | null; // 生效视图：全局 + 我的（同名覆盖）
   globalMcpServers: McpServerInfo[] | null; // 全局原始列表（仅管理员拉取）
   skills: SkillInfo[] | null; // 生效视图：全局 + 我的（同名覆盖）
   globalSkills: SkillInfo[] | null; // 全局原始列表（仅管理员拉取）
+  myRelay: MyRelayStatus | null; // 网络中继：我的开关 + 管理员总开关 + 桌面在线
+  adminRelayConfig: RelayConfigInfo | null; // 网络中继管理页（总开关+白名单+统计）
   browser: BrowserState; // built-in browser surface (embedded pane / popup)
 
   login(serverUrl: string, username: string, password: string): Promise<void>;
@@ -159,8 +165,18 @@ export interface BlmState {
   loadShared(): Promise<void>;
   ownerOnlineOf(sessionId: string): boolean;
   loadLlmConfig(): Promise<void>;
-  saveLlmConfig(patch: { api_key?: string; base_url?: string; model?: string }): Promise<void>;
+  saveLlmConfig(patch: {
+    api_key?: string;
+    base_url?: string;
+    model?: string;
+    protocol?: "anthropic" | "openai";
+  }): Promise<void>;
   clearLlmConfig(): Promise<void>;
+  // 网络中继（用户开关在设置面板；管理员配置在管理页）。
+  loadMyRelay(): Promise<void>;
+  setMyRelayOptIn(on: boolean): Promise<void>;
+  loadAdminRelayConfig(): Promise<void>;
+  saveAdminRelayConfig(patch: RelayConfigUpdate): Promise<void>;
   // MCP 服务器管理（保存后新会话生效）。失败时抛出已翻译的 Error。
   loadMcpServers(): Promise<void>;
   saveMcpServer(name: string, def: McpServerDef): Promise<void>;
@@ -215,6 +231,7 @@ export interface BlmState {
   stopSpeaking(): void;
   setExpr(expr: DflyExpr, holdMs?: number): void;
   setAvatarMode(mode: "dragonfly" | "digitalhuman"): void;
+  setAvatarVisible(on: boolean): void;
   updateVoiceSettings(patch: Partial<VoiceSettings>): void;
   initBrowser(): void;
   setBrowserMode(mode: "embedded" | "popup"): Promise<void>;

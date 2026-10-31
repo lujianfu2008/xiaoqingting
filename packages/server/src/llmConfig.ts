@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { LlmConfigInfo } from "@blm/protocol";
+import type { LlmConfigInfo, LlmProtocol } from "@blm/protocol";
 import { config } from "./config.js";
 
 // Per-user LLM credentials (data/llm-configs.json), keyed by username.
@@ -12,6 +12,9 @@ interface StoredLlmConfig {
   api_key_enc?: string;
   base_url?: string;
   model?: string;
+  protocol?: LlmProtocol;
+  // 每用户费用上限（美元，0 = 不限）；absent = 跟随全局 MAX_BUDGET_USD。
+  max_budget_usd?: number;
   updated_at: string;
 }
 
@@ -19,12 +22,16 @@ export interface ResolvedLlmConfig {
   api_key?: string;
   base_url?: string;
   model?: string;
+  protocol?: LlmProtocol;
 }
 
 export interface LlmConfigPatch {
   api_key?: string;
   base_url?: string;
   model?: string;
+  protocol?: LlmProtocol;
+  // null = 清除个人设置（跟随全局）；absent = 保持不变。
+  max_budget_usd?: number | null;
 }
 
 function configsFile(): string {
@@ -88,22 +95,40 @@ export function getUserLlmConfig(username: string): ResolvedLlmConfig | null {
   const base_url = stored.base_url?.trim() || undefined;
   const model = stored.model?.trim() || undefined;
   if (!api_key && !base_url && !model) return null;
-  return { api_key: api_key ?? undefined, base_url, model };
+  return { api_key: api_key ?? undefined, base_url, model, protocol: stored.protocol };
+}
+
+/**
+ * 每用户费用上限：undefined = 未设置（跟随全局 MAX_BUDGET_USD）；0 = 不限制；
+ * >0 = 上限美元数。与凭证无关——只用服务器默认模型的用户也能设自己的上限。
+ */
+export function getUserMaxBudgetUsd(username: string): number | undefined {
+  const v = loadAll()[username]?.max_budget_usd;
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
 }
 
 /** Client-safe view: no plaintext key, only the last 4 characters. */
 export function describeLlmConfig(username: string): LlmConfigInfo {
   const stored = loadAll()[username];
-  if (!stored) return { configured: false };
+  if (!stored) return { configured: false, global_budget_usd: config.maxBudgetUsd };
   const api_key = stored.api_key_enc ? decrypt(stored.api_key_enc) : null;
   const base_url = stored.base_url?.trim() || undefined;
   const model = stored.model?.trim() || undefined;
-  if (!api_key && !base_url && !model) return { configured: false };
+  if (!api_key && !base_url && !model) {
+    return {
+      configured: false,
+      global_budget_usd: config.maxBudgetUsd,
+      ...(stored.max_budget_usd !== undefined ? { max_budget_usd: stored.max_budget_usd } : {}),
+    };
+  }
   return {
     configured: true,
     base_url,
     model,
+    protocol: stored.protocol,
     api_key_hint: api_key ? api_key.slice(-4) : undefined,
+    ...(stored.max_budget_usd !== undefined ? { max_budget_usd: stored.max_budget_usd } : {}),
+    global_budget_usd: config.maxBudgetUsd,
   };
 }
 
@@ -121,12 +146,22 @@ export function setUserLlmConfig(
     api_key_enc: prev?.api_key_enc,
     base_url: prev?.base_url,
     model: prev?.model,
+    protocol: prev?.protocol,
+    max_budget_usd: prev?.max_budget_usd,
     updated_at: new Date().toISOString(),
   };
   const apiKey = patch.api_key?.trim();
   if (apiKey) next.api_key_enc = encrypt(apiKey);
   if (patch.base_url !== undefined) next.base_url = patch.base_url.trim() || undefined;
   if (patch.model !== undefined) next.model = patch.model.trim() || undefined;
+  if (patch.max_budget_usd !== undefined) {
+    // null = 清除个人设置（跟随全局）；数字原样存（0 = 不限）。
+    next.max_budget_usd = patch.max_budget_usd === null ? undefined : patch.max_budget_usd;
+  }
+  if (patch.protocol !== undefined) {
+    // "anthropic" 是缺省行为，落盘时归一成 undefined，老配置不受影响。
+    next.protocol = patch.protocol === "openai" ? "openai" : undefined;
+  }
   all[username] = next;
   saveAll(all);
   return describeLlmConfig(username);

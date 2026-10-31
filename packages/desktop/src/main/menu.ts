@@ -1,10 +1,11 @@
 import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { LANGUAGES, menuStrings, resolveLanguage } from "./i18n";
 import { loadSettings, patchSettings, type Language } from "./settings";
+import { safeSend, windowAlive } from "./safeSend";
 
-// Localized application menu (文件/编辑/视图/窗口/帮助/语言·设置). Electron
+// Localized application menu (文件/编辑/视图/窗口/设置/帮助). Electron
 // roles keep every accelerator and native behavior; only labels are overridden.
-// 设置入口在「语言 / 设置」菜单顶部（语言选择的同一菜单），经 IPC 打开渲染端的设置对话框。
+// 设置入口在「设置」菜单顶部（语言选择的同一菜单），经 IPC 打开渲染端的设置对话框。
 
 export function currentLanguage(): Language {
   return loadSettings().language;
@@ -20,7 +21,7 @@ export function setLanguage(lang: Language): void {
   applyAppMenu();
   const resolved = resolveLanguage(lang);
   for (const w of BrowserWindow.getAllWindows()) {
-    w.webContents.send("blm:menu:lang-changed", resolved);
+    if (windowAlive(w)) safeSend(w.webContents, "blm:menu:lang-changed", resolved);
   }
 }
 
@@ -66,10 +67,6 @@ export function buildAppMenu(langSetting: Language): Menu {
       ],
     },
     {
-      label: t.help,
-      submenu: [{ role: "about", label: t.about }],
-    },
-    {
       label: t.language,
       submenu: [
         {
@@ -77,9 +74,8 @@ export function buildAppMenu(langSetting: Language): Menu {
           accelerator: "CmdOrCtrl+,",
           click: (_mi, win) => {
             // Electron types this as BaseWindow; only BrowserWindow has contents.
-            (win as import("electron").BrowserWindow | undefined)?.webContents.send(
-              "blm:menu:open-settings",
-            );
+            const w = win as import("electron").BrowserWindow | undefined;
+            if (windowAlive(w)) safeSend(w.webContents, "blm:menu:open-settings");
           },
         },
         { type: "separator" },
@@ -90,6 +86,10 @@ export function buildAppMenu(langSetting: Language): Menu {
           click: () => setLanguage(l.id),
         })),
       ],
+    },
+    {
+      label: t.help,
+      submenu: [{ role: "about", label: t.about }],
     },
   ];
 

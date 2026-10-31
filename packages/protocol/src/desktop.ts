@@ -15,3 +15,14 @@ export const ExportChatResult = z.object({
   path: z.string().nullable(),
 });
 export type ExportChatResult = z.infer<typeof ExportChatResult>;
+
+// ---------- 网络中继（renderer -> main 的配置下发，token 只存 main 内存） ----------
+
+/** renderer 登录后把 serverUrl + JWT 下发给 main 的 relay 连接用（内存持有）。
+ * enabled=false 时凭证字段可为空（logout 只需断开）。 */
+export const RelayConfigure = z.object({
+  server_url: z.string().max(300),
+  token: z.string().max(2048),
+  enabled: z.boolean(),
+});
+export type RelayConfigure = z.infer<typeof RelayConfigure>;

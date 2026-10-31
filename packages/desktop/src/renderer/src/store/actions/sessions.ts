@@ -24,6 +24,9 @@ export function createSessionActions(
 > {
   return {
     async newSession(agentId, projectId) {
+      // 切入新会话：停掉上一会话的朗读，表情归位。
+      get().stopSpeaking();
+      get().setExpr("normal");
       const { serverUrl, token } = get();
       const res = await fetch(`${apiBase(serverUrl)}/api/sessions`, {
         method: "POST",
@@ -65,6 +68,12 @@ export function createSessionActions(
     },
 
     async selectSession(id) {
+      // 真正切换会话（而非重连时对同一会话补拉）：停掉朗读、表情归位，
+      // 状态同步到新会话，不把上一个会话的朗读/表情带过去。
+      if (get().currentSessionId && get().currentSessionId !== id) {
+        get().stopSpeaking();
+        get().setExpr("normal");
+      }
       const { serverUrl, token } = get();
       const res = await fetch(`${apiBase(serverUrl)}/api/sessions/${id}/messages`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -142,6 +151,11 @@ export function createSessionActions(
 
     async deleteSession(id) {
       const { serverUrl, token, currentSessionId } = get();
+      // 删掉的是当前会话：同样停朗读、表情归位（即将切换到别的会话）。
+      if (currentSessionId === id) {
+        get().stopSpeaking();
+        get().setExpr("normal");
+      }
       await fetch(`${apiBase(serverUrl)}/api/sessions/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },

@@ -339,6 +339,28 @@ export function SessionList({
         onChange={(e) => setQuery(e.target.value)}
       />
 
+      {/* New-project entry lives right below the search box. The row-level ＋
+          buttons mean "new session in this project" and must not be confused
+          with creating a project. */}
+      <button
+        title={t("proj.newProjectTip")}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left",
+          padding: groupHeaderStyle.padding,
+          margin: "2px 0 0",
+          fontSize: 12,
+          color: "var(--muted)",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+        }}
+        onClick={onNewProject}
+      >
+        {t("proj.newProject")}
+      </button>
+
       {visiblePersonal.map((p) => (
         <ProjectGroup
           key={p.project_id}
@@ -363,28 +385,6 @@ export function SessionList({
           onSettings={() => setSettingsFor(p)}
         />
       ))}
-
-      {/* New-project entry lives below the project groups, not next to 新对话 —
-          the row-level ＋ buttons mean "new session in this project" and must
-          not be confused with creating a project. */}
-      <button
-        title={t("proj.newProjectTip")}
-        style={{
-          display: "block",
-          width: "100%",
-          textAlign: "left",
-          padding: groupHeaderStyle.padding,
-          margin: "2px 0 0",
-          fontSize: 12,
-          color: "var(--muted)",
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-        }}
-        onClick={onNewProject}
-      >
-        {t("proj.newProject")}
-      </button>
 
       {def.length > 0 && <div style={groupHeaderStyle}>{t("sess.defaultSpace")}</div>}
       {def.map((s) => (

@@ -17,6 +17,7 @@ export function createVoiceActions(
   | "stopSpeaking"
   | "setExpr"
   | "setAvatarMode"
+  | "setAvatarVisible"
 > {
   return {
     setAutoRead(on) {
@@ -75,6 +76,11 @@ export function createVoiceActions(
     setAvatarMode(mode) {
       set({ avatarMode: mode });
       localStorage.setItem(LS.avatarMode, mode);
+    },
+
+    setAvatarVisible(on) {
+      set({ avatarVisible: on });
+      localStorage.setItem(LS.avatarVisible, on ? "1" : "0");
     },
   };
 }

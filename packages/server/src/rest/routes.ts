@@ -9,6 +9,7 @@ import { registerLlmRoutes } from "./llmRoutes.js";
 import { registerAsrRoutes } from "./asrRoutes.js";
 import { registerMcpRoutes } from "./mcpRoutes.js";
 import { registerSkillRoutes } from "./skillRoutes.js";
+import { registerRelayRoutes } from "./relayRoutes.js";
 
 // Composes the REST surface. Auth goes first because it also installs the JWT
 // onRequest hook that protects every route registered after it.
@@ -27,6 +28,7 @@ export function registerRoutes(
   registerAsrRoutes(app);
   registerMcpRoutes(app, manager);
   registerSkillRoutes(app, manager);
+  registerRelayRoutes(app, manager);
 }
 
 // Fastify request augmentation

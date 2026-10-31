@@ -128,6 +128,22 @@ contextBridge.exposeInMainWorld("blm", {
     return () => ipcRenderer.removeListener("blm:wake:detected", listener);
   },
   focusWindow: (): Promise<void> => ipcRenderer.invoke("blm:app:focus"),
+  // 网络中继：登录后下发 serverUrl+JWT（token 只存 main 内存），status 供
+  // 设置面板展示本地连接状态与统计。
+  relayConfigure: (
+    req: {
+      server_url: string;
+      token: string;
+      enabled: boolean;
+    },
+  ): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("blm:relay:configure", req),
+  relayStatus: (): Promise<{
+    enabled: boolean;
+    connected: boolean;
+    active_requests: number;
+    requests_total: number;
+    requests_failed: number;
+  }> => ipcRenderer.invoke("blm:relay:status"),
   browser: {
     state: (): Promise<BrowserState> => ipcRenderer.invoke("blm:browser:state"),
     setBounds: (rect: { x: number; y: number; width: number; height: number }): Promise<void> =>

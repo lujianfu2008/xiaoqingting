@@ -2,6 +2,7 @@ import { app, Menu, Notification, Tray, type BrowserWindow } from "electron";
 import path from "node:path";
 import { uiStrings } from "./i18n";
 import { loadSettings } from "./settings";
+import { windowAlive } from "./safeSend";
 
 // System tray: created the first time ✕ hides the window (关闭按钮行为=托盘).
 // Left-click restores the window; the context menu always offers a real quit.
@@ -18,6 +19,7 @@ function trayIconPath(): string {
 }
 
 function restore(win: BrowserWindow): void {
+  if (!windowAlive(win)) return; // window torn down while the tray still lived
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();

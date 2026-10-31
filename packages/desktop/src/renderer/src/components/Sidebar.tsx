@@ -24,6 +24,8 @@ export function Sidebar(props: { chrome?: PaneChrome }): React.JSX.Element {
   const newSession = useStore((s) => s.newSession);
   const setCurrentAgent = useStore((s) => s.setCurrentAgent);
   const avatarMode = useStore((s) => s.avatarMode);
+  const avatarVisible = useStore((s) => s.avatarVisible);
+  const setAvatarVisible = useStore((s) => s.setAvatarVisible);
   const sessions = useStore((s) => s.sessions);
   const t = useT();
 
@@ -34,20 +36,12 @@ export function Sidebar(props: { chrome?: PaneChrome }): React.JSX.Element {
   // 形象区高度（px）。null = 跟随 CSS 默认（蜻蜓 15% / 数字人 24%）；双击 split
   // 复位回 null。数字人 stage / 蜻蜓 SVG 都随容器自适应。
   const [avatarH, setAvatarH] = useState<number | null>(() => loadOptNum(LS.sidebarAvatarH));
-  // 形象区收起：隐藏 hero 只留一条细条，点细条展开（拖拽出来的高度记忆保留）。
-  const [avatarCollapsed, setAvatarCollapsed] = useState(
-    () => localStorage.getItem(LS.sidebarAvatarCollapsed) === "1",
-  );
   const asideRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (avatarH === null) localStorage.removeItem(LS.sidebarAvatarH);
     else localStorage.setItem(LS.sidebarAvatarH, String(avatarH));
   }, [avatarH]);
-  useEffect(() => {
-    if (avatarCollapsed) localStorage.setItem(LS.sidebarAvatarCollapsed, "1");
-    else localStorage.removeItem(LS.sidebarAvatarCollapsed);
-  }, [avatarCollapsed]);
 
   // 应用菜单 → 设置… (main process forwards the click over IPC).
   useEffect(() => window.blm.onOpenSettings(() => setSettingsOpen(true)), []);
@@ -64,16 +58,16 @@ export function Sidebar(props: { chrome?: PaneChrome }): React.JSX.Element {
   return (
     <aside className="sidebar" ref={asideRef}>
       {props.chrome && <PaneTools {...props.chrome} />}
-      {avatarCollapsed ? (
+      {!avatarVisible ? (
         <div className="hero-collapsed">
-          <button title={t("side.showAvatar")} onClick={() => setAvatarCollapsed(false)}>
+          <button title={t("side.showAvatar")} onClick={() => setAvatarVisible(true)}>
             ⌄ {t("side.showAvatar")}
           </button>
         </div>
       ) : (
         <>
           <SidebarAvatar
-            onCollapse={() => setAvatarCollapsed(true)}
+            onCollapse={() => setAvatarVisible(false)}
             style={
               avatarH !== null
                 ? {

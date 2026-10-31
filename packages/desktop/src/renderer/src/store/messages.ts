@@ -29,6 +29,8 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
         streaming:
           msg.block.kind === "text" ? { ...s.streaming, [msg.session_id]: "" } : s.streaming,
       }));
+      // 朗读/表情只跟随当前正查看的会话：后台会话的回复不读、不驱动表情。
+      if (msg.session_id !== get().currentSessionId) break;
       // Auto-read final assistant text when enabled
       if (msg.block.kind === "text" && get().autoRead && msg.block.text.trim()) {
         get().speak(msg.block.text);
@@ -87,7 +89,10 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
           : s.sessions,
       }));
       // Fallback: reply ended without an emotion tag → a small happy nod
-      if (get().expr === "normal") get().setExpr("happy", 1800);
+      // （只对当前会话：后台会话跑完不驱动表情）
+      if (msg.session_id === get().currentSessionId && get().expr === "normal") {
+        get().setExpr("happy", 1800);
+      }
       break;
 
     case "error":
@@ -107,7 +112,10 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
         error: msg.message,
         busy: msg.session_id ? { ...s.busy, [msg.session_id]: false } : s.busy,
       }));
-      get().setExpr("sad", 3000);
+      // 表情只跟随当前会话（或全局性错误）；后台会话报错只弹提示不变脸。
+      if (!msg.session_id || msg.session_id === get().currentSessionId) {
+        get().setExpr("sad", 3000);
+      }
       break;
 
     case "update_request":

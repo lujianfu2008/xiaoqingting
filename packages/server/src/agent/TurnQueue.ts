@@ -23,6 +23,11 @@ export class TurnQueue implements AsyncIterable<SDKUserMessage> {
     for (const r of this.resolvers.splice(0)) r({ value: undefined, done: true });
   }
 
+  /** 已排队但引擎尚未消费的消息数；0 表示引擎处于回合间空闲。 */
+  get pending(): number {
+    return this.items.length;
+  }
+
   [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
     return {
       next: (): Promise<IteratorResult<SDKUserMessage>> => {

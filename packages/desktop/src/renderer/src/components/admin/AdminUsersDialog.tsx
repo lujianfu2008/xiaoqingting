@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { AdminUserDetail, AuditEntry } from "@blm/protocol";
 import { useStore } from "../../store";
 import { useT } from "../../i18n";
+import { Overlay } from "../Overlay";
+import { AdminRelayPanel } from "./RelayPanel";
 
 // 用户管理（公有域管理员）/ 注册审核（管理员 + 其授权的审核员）。
 // manage = 全量用户管理（角色授权、禁用、审核）；review = 仅待审核注册列表。
@@ -25,8 +27,8 @@ export function AdminUsersDialog({
   const username = useStore((s) => s.username);
   const [users, setUsers] = useState<AdminUserDetail[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  // manage 模式的小 tab：用户列表 / 操作日志（审计）。
-  const [tab, setTab] = useState<"users" | "audit">("users");
+  // manage 模式的小 tab：用户列表 / 操作日志（审计）/ 网络中继（仅管理员）。
+  const [tab, setTab] = useState<"users" | "audit" | "relay">("users");
   // 行内重置密码：正在改的用户名 + 输入中的新密码（Electron 无 window.prompt）。
   const [resettingPw, setResettingPw] = useState<string | null>(null);
   const [pwInput, setPwInput] = useState("");
@@ -95,12 +97,13 @@ export function AdminUsersDialog({
       "review.reject": t("au.act.reject"),
       "mcp.global_save": t("au.act.mcpSave"),
       "mcp.global_delete": t("au.act.mcpDelete"),
+      "relay.config_save": t("au.act.relaySave"),
     };
     return map[action] ?? action;
   };
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="dialog" style={{ minWidth: 500, maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
         <h2>{mode === "manage" ? t("au.title") : t("ru.title")}</h2>
 
@@ -123,10 +126,21 @@ export function AdminUsersDialog({
             >
               {t("au.tabAudit")}
             </button>
+            <button
+              className={tab === "relay" ? "primary" : ""}
+              style={{ fontSize: 11, padding: "2px 10px" }}
+              onClick={() => setTab("relay")}
+            >
+              {t("set.tabRelay")}
+            </button>
           </div>
         )}
 
-        {tab === "audit" ? (
+        {tab === "relay" ? (
+          <div style={{ padding: "0 8px" }}>
+            <AdminRelayPanel />
+          </div>
+        ) : tab === "audit" ? (
           <>
             <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 8px 6px" }}>
               <button
@@ -413,6 +427,6 @@ export function AdminUsersDialog({
           </button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

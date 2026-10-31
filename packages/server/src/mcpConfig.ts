@@ -146,7 +146,8 @@ const PRIVATE_V4_RE = [
   /^172\.(1[6-9]|2\d|3[01])\./,
 ];
 
-function isPrivateAddress(addr: string): boolean {
+// relay（客户端出口中继）复用：CONNECT 目标与桌面端拨号前的私网检查。
+export function isPrivateAddress(addr: string): boolean {
   if (addr.includes(":")) {
     const low = addr.toLowerCase();
     return low === "::1" || low === "::" || low.startsWith("fc") || low.startsWith("fd") || low.startsWith("fe80");

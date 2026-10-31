@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { app, type WebContents } from "electron";
+import { safeSend } from "./safeSend";
 // 语音唤醒：sherpa-onnx KeywordSpotter（zipformer wenetspeech 3.3M，int8）。
 // 纯 NAPI 原生模块，与 asr.ts 一样直接跑在主进程。唤醒词在运行时由
 // pinyin-pro 转成模型的 ppinyin token 序列生成 keywords.txt——设置里改词
@@ -156,7 +157,7 @@ export function feedWakeChunk(pcm: ArrayBuffer, sender: WebContents): void {
     const r = spotter.getResult(stream);
     if (r && typeof r.keyword === "string" && r.keyword) {
       spotter.reset(stream); // 立即复位，连续喊两次也能两次唤醒
-      if (!sender.isDestroyed()) sender.send("blm:wake:detected", r.keyword);
+      safeSend(sender, "blm:wake:detected", r.keyword);
     }
   } catch {
     // 单块坏数据绝不能杀死常驻监听

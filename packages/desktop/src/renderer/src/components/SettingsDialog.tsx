@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useT } from "../i18n";
+import { Overlay } from "./Overlay";
 import { GeneralPanel } from "./settings/GeneralPanel";
 import { LlmPanel } from "./settings/LlmPanel";
+import { RelayPanel } from "./settings/RelayPanel";
 import { McpPanel } from "./settings/McpPanel";
 import { SkillsPanel } from "./settings/SkillsPanel";
 import { VoicePanel } from "./settings/VoicePanel";
@@ -12,11 +14,12 @@ import { AccountPanel } from "./settings/AccountPanel";
 // the window. All voice values persist in localStorage (blm.voiceSettings /
 // blm.autoRead); the LLM and MCP configs live on the server.
 
-type Tab = "general" | "llm" | "mcp" | "skills" | "voice" | "asr" | "account";
+type Tab = "general" | "llm" | "relay" | "mcp" | "skills" | "voice" | "asr" | "account";
 
 const TAB_KEYS = [
   { id: "general", key: "set.tabGeneral" },
   { id: "llm", key: "set.tabLlm" },
+  { id: "relay", key: "set.tabRelay" },
   { id: "mcp", key: "set.tabMcp" },
   { id: "skills", key: "set.tabSkills" },
   { id: "voice", key: "set.tabVoice" },
@@ -29,9 +32,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const [tab, setTab] = useState<Tab>("general");
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <Overlay onClose={onClose} closeOnOutside={false}>
       <div className="dialog settings" onClick={(e) => e.stopPropagation()}>
-        <h2>{t("set.title")}</h2>
+        <div className="dialog-head">
+          <h2>{t("set.title")}</h2>
+          <button
+            className="dialog-close"
+            title={t("set.close")}
+            aria-label={t("set.close")}
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
         <div className="settings-body">
           <nav className="settings-tabs">
             {TAB_KEYS.map((tb) => (
@@ -52,6 +65,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             </div>
             <div className={`settings-pane ${tab === "llm" ? "" : "hidden"}`}>
               <LlmPanel />
+            </div>
+            <div className={`settings-pane ${tab === "relay" ? "" : "hidden"}`}>
+              <RelayPanel />
             </div>
             <div className={`settings-pane ${tab === "mcp" ? "" : "hidden"}`}>
               <McpPanel />
@@ -76,6 +92,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           </button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

@@ -36,7 +36,12 @@ export const config = {
   engineCwd: path.join(path.resolve(env("DATA_DIR", "./data")), "engine"),
   permissionTimeoutMs: Number(env("PERMISSION_TIMEOUT_MS", "300000")),
   sessionIdleMs: Number(env("SESSION_IDLE_MS", "600000")),
+  // 回合看门狗：回合内连续这么久没有任何 SDK 消息（模型 API 挂死/子进程失联）
+  // 就判定回合卡死，报错并强杀引擎。必须大于最长的合法静默窗口：
+  // 审批 300s + 本机执行 180s = 480s，所以默认 10 分钟。
+  turnWatchdogMs: Number(env("TURN_WATCHDOG_MS", "600000")),
   maxTurns: Number(env("MAX_TURNS", "50")),
+  // <= 0 = 不限制（不传给 SDK）。耗尽行为见 sessionOptions/AgentSession。
   maxBudgetUsd: Number(env("MAX_BUDGET_USD", "5")),
   revealUsage: env("REVEAL_USAGE", "false") === "true",
   // Cloud ASR (defaults to the Zhipu BigModel endpoint, reusing the LLM token)

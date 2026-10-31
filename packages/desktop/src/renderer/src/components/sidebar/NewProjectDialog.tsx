@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../../store";
 import { useT } from "../../i18n";
+import { Overlay } from "../Overlay";
 
 type ScopeMode = AccessScopeState["mode"];
 
@@ -45,7 +46,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }): React.JS
   };
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="dialog" style={{ minWidth: 360 }} onClick={(e) => e.stopPropagation()}>
         <h2>{t("np.title")}</h2>
         <p style={{ color: "var(--muted)", fontSize: 12, margin: "4px 0 12px" }}>
@@ -145,6 +146,6 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }): React.JS
           </button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

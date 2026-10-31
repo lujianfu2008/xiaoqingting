@@ -8,7 +8,7 @@ import { TurnQueue } from "./TurnQueue.js";
 import { buildSessionOptions, type PublicSessionCtx } from "./sessionOptions.js";
 import { createPublicRun } from "./publicTools.js";
 import { handleSdkMessage } from "./sdkMessageHandler.js";
-import { LLM_AUTH_ERROR_MESSAGE, isAuthFailureText } from "./sdkText.js";
+import { LLM_AUTH_ERROR_MESSAGE, isAuthFailureText, isBudgetExhaustedText } from "./sdkText.js";
 import { ClientRequests } from "./clientRequests.js";
 import type { UpdateRequestManager } from "./updateRequests.js";
 
@@ -33,6 +33,8 @@ export class AgentSession {
   private disposed = false;
   private busy = false;
   private idleTimer: NodeJS.Timeout | null = null;
+  private watchdog: NodeJS.Timeout | null = null;
+  private turnActive = false;
   private onDispose?: () => void;
   private requests: ClientRequests;
 
@@ -107,20 +109,34 @@ export class AgentSession {
           emitBlocks: (blocks) => this.emitBlocks(blocks),
           onEngineSessionId: (engineSessionId) => this.persistEngineSessionId(engineSessionId),
           onUsage: (usage) => this.recordUsage(usage),
-          onTurnEnd: () => this.scheduleIdleClose(),
+          onTurnEnd: () => {
+            // 回合结束：队列里还有背靠背排队的消息时引擎马上继续跑，保持 busy；
+            // 否则标记空闲——disposeIdleSessions（更换 LLM/MCP 配置后调用）
+            // 才能回收热会话，让下一条消息按新配置 resume 重建。（此前 busy
+            // 在引擎循环存活期间一直为 true，配置变更永远跳过热会话。）
+            this.busy = this.turnQueue.pending > 0;
+            this.turnActive = false;
+            this.disarmWatchdog();
+            this.scheduleIdleClose();
+          },
         });
+        // 回合有动静（任何 SDK 消息）就续期看门狗；回合结束则解除。
+        if (this.turnActive) this.armWatchdog();
       }
     } catch (err) {
       if (this.disposed || this.abort.signal.aborted) return; // expected on interrupt/dispose
       const raw = err instanceof Error ? err.message : String(err);
       const auth = isAuthFailureText(raw);
+      const budget = isBudgetExhaustedText(raw);
       this.events.send({
         type: "error",
         session_id: this.record.session_id,
-        code: auth ? "llm_auth" : "agent_error",
+        code: auth ? "llm_auth" : budget ? "llm_budget" : "agent_error",
         message: auth
           ? LLM_AUTH_ERROR_MESSAGE
-          : "智能体处理请求时出现内部错误，请稍后重试。",
+          : budget
+            ? `本次会话累计费用已达上限（$${config.maxBudgetUsd}），引擎已停止调用模型。请新开会话继续，或由服务端调大 MAX_BUDGET_USD。`
+            : "智能体处理请求时出现内部错误，请稍后重试。",
       });
       console.error(`[session ${this.record.session_id}] agent loop error:`, raw);
     } finally {
@@ -167,6 +183,12 @@ export class AgentSession {
     this.touch();
     this.turnQueue.push(text);
     this.busy = true;
+    // 排队的后续消息不重置看门狗死线：死线只随引擎消息续期。引擎卡死时
+    // 用户的催促不该把死线越推越远（实测连发消息能无限顺延触达时间）。
+    if (!this.turnActive) {
+      this.turnActive = true;
+      this.armWatchdog();
+    }
   }
 
   async interrupt(): Promise<void> {
@@ -189,6 +211,7 @@ export class AgentSession {
     if (this.disposed) return;
     this.disposed = true;
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.disarmWatchdog();
     this.requests.failAll();
     this.abort.abort();
     this.turnQueue.end();
@@ -213,5 +236,46 @@ export class AgentSession {
     this.touch();
     this.idleTimer = setTimeout(() => this.dispose(), config.sessionIdleMs);
     this.idleTimer.unref();
+  }
+
+  // ---------- turn watchdog ----------
+  // 引擎回合可能永久静默卡死：模型 API 流式响应中途停摆（SDK 对流中停摆
+  // 无超时）、子进程失联等。此时 result/error 永远不来，客户端 busy 卡死，
+  // 输入被无声吞掉。看门狗以「回合内连续无 SDK 消息」判死：先告知客户端
+  // （复位 busy），再强杀引擎——会话经 onDispose 摘除，下一条消息按
+  // engine_session_id resume 重建。
+
+  private armWatchdog(): void {
+    this.disarmWatchdog();
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      if (this.disposed) return;
+      console.warn(`[session ${this.record.session_id}] turn stalled ${config.turnWatchdogMs}ms without engine messages — aborting`);
+      this.events.send({
+        type: "error",
+        session_id: this.record.session_id,
+        code: "agent_timeout",
+        message: "模型长时间没有响应，本次回复已中止。请重新发送消息再试。",
+      });
+      this.abort.abort();
+      // abort 未必能让卡死的引擎迭代器退出（预算耗尽等场景 CLI 会静默僵死、
+      // 连错误结果都不发）。10s 后仍未自毁就强制 dispose：从持有方 Map 摘除，
+      // 后续消息走 resume 重建——绝不允许会话永久吞消息。僵死的 CLI 子进程
+      // 可能残留（idle 不耗 CPU），随服务进程退出回收。
+      setTimeout(() => {
+        if (!this.disposed) {
+          console.warn(`[session ${this.record.session_id}] engine still wedged after abort — forcing dispose`);
+          this.dispose();
+        }
+      }, 10_000).unref();
+    }, config.turnWatchdogMs);
+    this.watchdog.unref();
+  }
+
+  private disarmWatchdog(): void {
+    if (this.watchdog) {
+      clearTimeout(this.watchdog);
+      this.watchdog = null;
+    }
   }
 }

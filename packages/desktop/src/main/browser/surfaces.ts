@@ -1,6 +1,7 @@
 import { BrowserWindow, WebContentsView, shell } from "electron";
 import { loadSettings } from "../settings";
 import { uiStrings } from "../i18n";
+import { safeSend, windowAlive } from "../safeSend";
 
 // Browser surfaces: the embedded WebContentsView docked in the main window and
 // the popup BrowserWindow. Only one is alive at a time. Also owns the state
@@ -36,12 +37,25 @@ export function setRuntimeMode(mode: BrowserMode): void {
 
 export function emit(): void {
   const s = state();
-  if (host && !host.isDestroyed()) host.webContents.send("blm:browser:state", s);
-  if (popup && !popup.isDestroyed()) popup.webContents.send("blm:browser:state", s);
+  if (windowAlive(host)) safeSend(host.webContents, "blm:browser:state", s);
+  if (windowAlive(popup)) safeSend(popup.webContents, "blm:browser:state", s);
+}
+
+// WebContentsView's .webContents getter itself throws once the view is gone —
+// a bare isDestroyed() check is not enough (this was the "Object has been
+// destroyed" escaping the wire() destroyed-listener → emit → state path).
+function embeddedWc(): Electron.WebContents | null {
+  if (!embedded) return null;
+  try {
+    return embedded.webContents.isDestroyed() ? null : embedded.webContents;
+  } catch {
+    return null; // view already destroyed
+  }
 }
 
 export function liveWebContents(): Electron.WebContents | null {
-  if (embedded && !embedded.webContents.isDestroyed()) return embedded.webContents;
+  const wc = embeddedWc();
+  if (wc) return wc;
   if (popup && !popup.isDestroyed()) return popup.webContents;
   return null;
 }
@@ -57,7 +71,7 @@ export function state(): BrowserState {
 }
 
 function attachToEmbedded(win: BrowserWindow): WebContentsView {
-  if (embedded && !embedded.webContents.isDestroyed()) {
+  if (embedded && embeddedWc()) {
     if (host !== win) {
       host?.contentView.removeChildView(embedded);
       host = win;
@@ -105,7 +119,7 @@ export function setBounds(win: BrowserWindow, rect: { x: number; y: number; widt
   const same =
     next.x === bounds.x && next.y === bounds.y && next.width === bounds.width && next.height === bounds.height;
   bounds = next;
-  if (embedded && !embedded.webContents.isDestroyed()) {
+  if (embedded && embeddedWc()) {
     if (host !== win) {
       host?.contentView.removeChildView(embedded);
       host = win;
@@ -116,14 +130,19 @@ export function setBounds(win: BrowserWindow, rect: { x: number; y: number; widt
 }
 
 export function destroyEmbedded(): void {
-  if (!embedded) return;
+  const view = embedded;
+  embedded = null;
+  if (!view) return;
   try {
-    host?.contentView.removeChildView(embedded);
+    host?.contentView.removeChildView(view);
   } catch {
     // window gone already
   }
-  if (!embedded.webContents.isDestroyed()) embedded.webContents.close();
-  embedded = null;
+  try {
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  } catch {
+    // view gone already — even the getter can throw here
+  }
 }
 
 export function destroyPopup(): void {
@@ -163,7 +182,7 @@ export function registerHost(win: BrowserWindow): void {
 
 /** Re-apply the last reported rect (called when the window resizes). */
 export function relayout(win: BrowserWindow): void {
-  if (!embedded || embedded.webContents.isDestroyed()) return;
+  if (!embedded || !embeddedWc()) return;
   if (host !== win) return;
   embedded.setBounds({ ...bounds });
 }

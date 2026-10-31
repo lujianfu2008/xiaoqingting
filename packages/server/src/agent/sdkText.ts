@@ -45,3 +45,10 @@ export function stringifyToolContent(content: unknown): string {
 
 export const LLM_AUTH_ERROR_MESSAGE =
   "大模型鉴权失败，请在设置→我的大模型中检查 API Key、Base URL 与模型名。";
+
+// Budget cap (--max-budget-usd) exhaustion. The CLI stops calling the model
+// and may wedge silently instead of emitting its error result — the message
+// only surfaces when the process dies or the watchdog kills it.
+export function isBudgetExhaustedText(text: string): boolean {
+  return /maximum budget|max.?budget/i.test(text);
+}

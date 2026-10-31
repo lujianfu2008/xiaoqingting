@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
+import { Overlay } from "./Overlay";
 import type { SessionMeta, UserSummary } from "@blm/protocol";
 
 // Share dialog: share a session with everyone or only with picked users.
@@ -58,7 +59,7 @@ export function ShareDialog({
   };
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="dialog" style={{ minWidth: 340 }} onClick={(e) => e.stopPropagation()}>
         <h2>{t("sh.title")}</h2>
         <p style={{ color: "var(--muted)", fontSize: 12, margin: "4px 0 12px" }}>
@@ -126,6 +127,6 @@ export function ShareDialog({
           </button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

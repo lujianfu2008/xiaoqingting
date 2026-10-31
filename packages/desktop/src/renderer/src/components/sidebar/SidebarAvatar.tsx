@@ -11,7 +11,10 @@ export function SidebarAvatar(props: {
   style?: React.CSSProperties;
   onCollapse?: () => void;
 }): React.JSX.Element {
-  const thinking = useStore((s) => Object.values(s.busy).some(Boolean));
+  // 思考状态只跟随当前会话：后台会话跑任务不该让小蜻蜓一直转。
+  const thinking = useStore((s) =>
+    s.currentSessionId ? (s.busy[s.currentSessionId] ?? false) : false,
+  );
   const speaking = useStore((s) => s.speaking);
   const expr = useStore((s) => s.expr);
   const avatarMode = useStore((s) => s.avatarMode);

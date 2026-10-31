@@ -13,27 +13,58 @@ import { resolveSafe } from "./workdir";
 const READ_DENIED = "路径不可读：不在访问范围内（可在设置中开启完全空间或添加自定义文件夹）。";
 const WRITE_DENIED = "路径超出工作目录：写入/删除仅限工作目录内（工作目录之外只读）。";
 
+// Chinese-Windows consoles emit GBK (cp936) while the pipe is read back as
+// UTF-8. Switch cmd.exe to UTF-8 first; `&` (not `&&`) keeps the real command
+// running even when chcp itself fails (e.g. no attached console).
+const CP_PREFIX = process.platform === "win32" ? "chcp 65001 >nul 2>nul & " : "";
+
 export function runCommand(cmd: string, cwd: string): Promise<ExecOutcome> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, {
+    const child = spawn(CP_PREFIX + cmd, {
       shell: true,
       cwd,
       env: { ...process.env },
     });
-    let out = "";
-    let err = "";
+    // Collect raw bytes and decode once at the end: per-chunk String(d) splits
+    // multi-byte characters across chunk boundaries. The whole buffer also
+    // lets us re-decode as GBK when a program ignores chcp and writes ANSI.
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let outBytes = 0;
+    let errBytes = 0;
+    const RAW_CAP = 1024 * 1024;
+    const decode = (chunks: Buffer[]): string => {
+      const buf = Buffer.concat(chunks);
+      const utf8 = buf.toString("utf8");
+      // Replacement chars mean the bytes aren't valid UTF-8 — fall back to
+      // GBK. ASCII is identical in both encodings, so misfires are harmless.
+      if (process.platform === "win32" && utf8.includes("�")) {
+        try {
+          return new TextDecoder("gbk").decode(buf);
+        } catch {
+          return utf8; // no full-ICU build; keep the lossy decode
+        }
+      }
+      return utf8;
+    };
     const cap = (s: string) => (s.length > MAX_OUTPUT ? s.slice(0, MAX_OUTPUT) + "\n...(输出已截断)" : s);
-    child.stdout.on("data", (d) => {
-      out += String(d);
+    child.stdout.on("data", (d: Buffer) => {
+      if (outBytes < RAW_CAP) {
+        out.push(d);
+        outBytes += d.length;
+      }
     });
-    child.stderr.on("data", (d) => {
-      err += String(d);
+    child.stderr.on("data", (d: Buffer) => {
+      if (errBytes < RAW_CAP) {
+        err.push(d);
+        errBytes += d.length;
+      }
     });
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       resolve({
         ok: false,
-        output: cap(out + err),
+        output: cap(decode(out) + decode(err)),
         error: `命令执行超时（${CMD_TIMEOUT_MS / 1000}秒），已终止。`,
       });
     }, CMD_TIMEOUT_MS);
@@ -43,7 +74,7 @@ export function runCommand(cmd: string, cwd: string): Promise<ExecOutcome> {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      const text = cap(out) + (err ? `\n[stderr]\n${cap(err)}` : "");
+      const text = cap(decode(out)) + (err.length ? `\n[stderr]\n${cap(decode(err))}` : "");
       resolve({ ok: code === 0, output: text || undefined, error: code === 0 ? undefined : `命令退出码：${code}` });
     });
   });

@@ -191,6 +191,10 @@ export function createAuthActions(
     logout() {
       clearIdentity();
       void window.blm.releaseLocalLogin();
+      // 网络中继：token 已失效，让 main 进程断开 /ws/relay 连接。
+      void window.blm
+        .relayConfigure({ server_url: "", token: "", enabled: false })
+        .catch(() => undefined);
       setClosedByUser(true);
       resetReconnect();
       resetReconnectAttempt();

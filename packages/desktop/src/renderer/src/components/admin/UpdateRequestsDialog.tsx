@@ -3,6 +3,7 @@ import type { UpdateRequestDetail, UpdateRequestView } from "@blm/protocol";
 import { useStore } from "../../store";
 import { apiBase } from "../../store/http";
 import { useT } from "../../i18n";
+import { Overlay } from "../Overlay";
 
 // 公有域更新申请（审核流）：管理员在此批准/拒绝；普通用户查看自己的申请
 // 状态。列表由 REST 拉取 + WS 实时刷新（store.messages 处理推送）。
@@ -59,7 +60,7 @@ export function UpdateRequestsDialog({ onClose }: { onClose: () => void }): Reac
   };
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="dialog" style={{ minWidth: 560, maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
         <h2>{t("ur.title")}</h2>
 
@@ -207,6 +208,6 @@ export function UpdateRequestsDialog({ onClose }: { onClose: () => void }): Reac
           </button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

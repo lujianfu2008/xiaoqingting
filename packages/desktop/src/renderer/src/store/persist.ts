@@ -23,7 +23,18 @@ export const LS = {
   sidebarAvatarH: "blm.sidebarAvatarH",
   // Avatar zone collapsed upward ("1") or shown; absent = shown.
   sidebarAvatarCollapsed: "blm.sidebarAvatarCollapsed",
+  // Same toggle as above, now owned by the store as「默认显示形象」("1"/"0").
+  avatarVisible: "blm.avatarVisible",
 } as const;
+
+/** 形象默认显隐。旧版只写 collapsed 键，首次读取时迁移过来。 */
+export function loadAvatarVisible(): boolean {
+  const v = localStorage.getItem(LS.avatarVisible);
+  if (v !== null) return v === "1";
+  const collapsed = localStorage.getItem(LS.sidebarAvatarCollapsed) === "1";
+  localStorage.removeItem(LS.sidebarAvatarCollapsed);
+  return !collapsed;
+}
 
 export function loadVoiceSettings(): VoiceSettings {
   try {

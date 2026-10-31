@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { executeLocal } from "./executor";
 import { markAttachments, previewAttachment, saveAttachment } from "./attachments";
-import { ExportChatRequest, type ExportChatResult } from "@blm/protocol";
+import { ExportChatRequest, RelayConfigure, type ExportChatResult } from "@blm/protocol";
+import { relayClient } from "./relay";
 import {
   ACCESS_MODES,
   accessScopeState,
@@ -47,21 +48,16 @@ function createWindow(): void {
 
   win.on("page-title-updated", (e) => e.preventDefault());
 
-  // ✕ and — are interceptable: 设置→关闭按钮行为=托盘 sends both to the tray
-  // instead. before-quit raises the flag so 菜单退出/托盘退出 close for real.
+  // 只有 ✕ 可拦截：设置→关闭按钮行为=托盘 时点关闭进托盘。最小化不拦截：
+  // — 始终正常缩到任务栏（拦截的话任务栏点击/Win+D 都会"消失"进托盘）。
+  // before-quit raises the flag so 菜单退出/托盘退出 close for real.
   let quitting = false;
   app.on("before-quit", () => {
     quitting = true;
   });
-  const toTray = (): boolean => !quitting && closeToTray(win);
   win.on("close", (e) => {
-    if (toTray()) e.preventDefault();
+    if (!quitting && closeToTray(win)) e.preventDefault();
   });
-  // Electron's typings give minimize's listener no event param, but the runtime
-  // does pass it — cast so we can preventDefault (same intercept as ✕).
-  win.on("minimize", ((e: Electron.Event) => {
-    if (toTray()) e.preventDefault();
-  }) as () => void);
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
@@ -225,6 +221,23 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("blm:login:release", () => releaseLogin());
 
+  // 网络中继（main/relay/）：renderer 登录后把 serverUrl + JWT 下发，main 进程
+  // 持有 /ws/relay 连接，把服务端发来的 llm_request 用本机网络（Electron net，
+  // 自动跟随系统代理）代发并流式回传。token 只存内存、绝不写盘。
+  // enabled=true 时凭证必须非空（logout 时 renderer 传空串只为断开）。
+  ipcMain.handle("blm:relay:configure", (_e, args: unknown) => {
+    const parsed = RelayConfigure.safeParse(args);
+    if (
+      !parsed.success ||
+      (parsed.data.enabled && (!parsed.data.server_url.trim() || !parsed.data.token.trim()))
+    ) {
+      return { ok: false, error: "无效请求" };
+    }
+    relayClient.configure(parsed.data);
+    return { ok: true };
+  });
+  ipcMain.handle("blm:relay:status", () => relayClient.status());
+
   // Window-close behavior (退出 / 最小化到托盘), edited in 设置 → 常规.
   ipcMain.handle("blm:app:getPrefs", () => ({ closeAction: loadSettings().closeAction }));
   ipcMain.handle("blm:app:setCloseAction", (_e, v: string) => {
@@ -356,4 +369,5 @@ app.on("before-quit", () => {
   releaseLogin();
   destroyTray();
   browser.shutdown();
+  relayClient.shutdown();
 });

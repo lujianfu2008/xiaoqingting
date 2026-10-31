@@ -65,6 +65,18 @@ declare global {
       wakeStop(): void;
       onWakeDetected(cb: (keyword: string) => void): () => void;
       focusWindow(): Promise<void>;
+      relayConfigure(req: {
+        server_url: string;
+        token: string;
+        enabled: boolean;
+      }): Promise<{ ok: boolean; error?: string }>;
+      relayStatus(): Promise<{
+        enabled: boolean;
+        connected: boolean;
+        active_requests: number;
+        requests_total: number;
+        requests_failed: number;
+      }>;
       pathForFile(file: File): string;
       saveAttachment(
         sessionId: string,

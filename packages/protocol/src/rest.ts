@@ -174,6 +174,8 @@ export const AUDIT_ACTIONS = [
   // 全局专家技能变更（管理员）。
   "skills.global_save",
   "skills.global_delete",
+  // 客户端出口中继配置变更（管理员）。
+  "relay.config_save",
 ] as const;
 
 export const AuditEntry = z.object({

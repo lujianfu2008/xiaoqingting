@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { AgentInfo } from "@blm/protocol";
 import type { BlmState } from "./types";
-import { LS, loadVoiceSettings } from "./persist";
+import { LS, loadAvatarVisible, loadVoiceSettings } from "./persist";
 import { apiBase } from "./http";
 import { createAuthActions } from "./actions/auth";
 import { createConnectionActions } from "./actions/connection";
@@ -9,6 +9,7 @@ import { createSessionActions } from "./actions/sessions";
 import { createProjectActions } from "./actions/projects";
 import { createAdminActions } from "./actions/admin";
 import { createLlmActions } from "./actions/llm";
+import { createRelayActions } from "./actions/relay";
 import { createMcpActions } from "./actions/mcp";
 import { createSkillActions } from "./actions/skills";
 import { createChatActions } from "./actions/chat";
@@ -59,12 +60,15 @@ export const useStore = create<BlmState>((set, get) => ({
   expr: "normal",
   avatarMode:
     localStorage.getItem(LS.avatarMode) === "digitalhuman" ? "digitalhuman" : "dragonfly",
+  avatarVisible: loadAvatarVisible(),
   voiceSettings: loadVoiceSettings(),
   llmConfig: null,
   mcpServers: null,
   globalMcpServers: null,
   skills: null,
   globalSkills: null,
+  myRelay: null,
+  adminRelayConfig: null,
   browser: { mode: "embedded", open: false, url: "", title: "" },
 
   ...createAuthActions(set, get),
@@ -73,6 +77,7 @@ export const useStore = create<BlmState>((set, get) => ({
   ...createProjectActions(set, get),
   ...createAdminActions(set, get),
   ...createLlmActions(set, get),
+  ...createRelayActions(set, get),
   ...createMcpActions(set, get),
   ...createSkillActions(set, get),
   ...createChatActions(set, get),
