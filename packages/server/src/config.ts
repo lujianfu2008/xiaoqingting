@@ -65,6 +65,8 @@ export function ensureDataDirs(): void {
   // 公有域项目工作空间（共有知识库文件所在）+ 更新申请记录。
   fs.mkdirSync(path.join(config.dataDir, "public-projects"), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, "update-requests"), { recursive: true });
+  // 协作流任务线程（一任务一 JSON）。
+  fs.mkdirSync(path.join(config.dataDir, "tasks"), { recursive: true });
   // 专家技能（全局插件目录；用户级在首次安装时按用户名创建）。
   fs.mkdirSync(path.join(config.dataDir, "skills", "global"), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, "skills", "users"), { recursive: true });

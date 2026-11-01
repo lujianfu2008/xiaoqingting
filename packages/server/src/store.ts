@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { Block, ProjectMeta, SessionMeta, UpdateRequestView } from "@blm/protocol";
+import type { Block, ProjectMeta, SessionMeta, TaskView, UpdateRequestView } from "@blm/protocol";
 import { config } from "./config.js";
 
 // Session metadata + block history persistence (own storage, independent of the SDK).
@@ -12,6 +12,8 @@ export interface SessionRecord extends SessionMeta {
   engine_session_id: string | null;
   // Optional so session JSONs written before projects exist still parse.
   project_id?: string | null;
+  // 协作流任务线程反向引用（仅服务端；客户端经 tasks store 反查，不靠这里）。
+  task_id?: string;
 }
 
 export interface ProjectRecord extends ProjectMeta {
@@ -22,6 +24,9 @@ export interface ProjectRecord extends ProjectMeta {
 export interface UpdateRequestRecord extends Omit<UpdateRequestView, "preview"> {
   content: string;
 }
+
+/** 协作流任务记录（形状即对外的 TaskView，无敏感字段可直接下发）。 */
+export interface TaskRecord extends TaskView {}
 
 /** Server-side workspace root of a public project (never exposed to clients). */
 export function publicProjectDir(projectId: string): string {
@@ -273,6 +278,40 @@ export class Store {
       const pb = b.status === "pending" ? 0 : 1;
       return pa !== pb ? pa - pb : b.created_at.localeCompare(a.created_at);
     });
+    return out;
+  }
+
+  // ---------- 协作流任务线程（一任务一 JSON） ----------
+
+  private taskPath(id: string): string {
+    return path.join(config.dataDir, "tasks", `${id}.json`);
+  }
+
+  saveTask(rec: TaskRecord): void {
+    fs.writeFileSync(this.taskPath(rec.task_id), JSON.stringify(rec, null, 2));
+  }
+
+  getTask(id: string): TaskRecord | null {
+    try {
+      return JSON.parse(fs.readFileSync(this.taskPath(id), "utf8")) as TaskRecord;
+    } catch {
+      return null;
+    }
+  }
+
+  listTasks(): TaskRecord[] {
+    const dir = path.join(config.dataDir, "tasks");
+    if (!fs.existsSync(dir)) return [];
+    const out: TaskRecord[] = [];
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        out.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as TaskRecord);
+      } catch {
+        // skip corrupt records
+      }
+    }
+    out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     return out;
   }
 

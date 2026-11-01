@@ -233,29 +233,38 @@ export class AgentSession {
   }
 
   private persistEngineSessionId(engineSessionId: string): void {
+    // 先读 fresh record 只改目标字段再回写：内存 record 可能落后于磁盘
+    // （会话存活期间协作流会给 record 并发写入 task_id/shared_with 等，
+    // 整对象回写会把那些变更覆盖掉）。
+    const fresh = this.store.getSession(this.record.session_id);
+    const rec = fresh ?? this.record;
+    rec.engine_session_id = engineSessionId;
     this.record.engine_session_id = engineSessionId;
-    this.store.saveSession(this.record);
+    this.store.saveSession(rec);
   }
 
   /** 记录本会话 token 用量（每条回复一次，随 record 落库并出现在会话 meta）。
    *  cumulative=true：modelUsage 口径，本身就是会话累计值——替换而非累加；
-   *  否则（老 CLI 的逐回合 usage）按原逻辑累加。 */
+   *  否则（老 CLI 的逐回合 usage）按原逻辑累加。与 persistEngineSessionId
+   *  同理：基于 fresh record 改目标字段，防覆盖并发写入。 */
   private recordUsage(usage: Usage, cumulative?: boolean): void {
+    const fresh = this.store.getSession(this.record.session_id);
+    const rec = fresh ?? this.record;
+    const prev = rec.usage;
     if (cumulative) {
-      this.record.usage = usage;
-      this.store.saveSession(this.record);
-      return;
+      rec.usage = usage;
+    } else {
+      rec.usage = {
+        input_tokens: (prev?.input_tokens ?? 0) + usage.input_tokens,
+        output_tokens: (prev?.output_tokens ?? 0) + usage.output_tokens,
+        cost_usd:
+          prev?.cost_usd != null || usage.cost_usd != null
+            ? (prev?.cost_usd ?? 0) + (usage.cost_usd ?? 0)
+            : null,
+      };
     }
-    const prev = this.record.usage;
-    this.record.usage = {
-      input_tokens: (prev?.input_tokens ?? 0) + usage.input_tokens,
-      output_tokens: (prev?.output_tokens ?? 0) + usage.output_tokens,
-      cost_usd:
-        prev?.cost_usd != null || usage.cost_usd != null
-          ? (prev?.cost_usd ?? 0) + (usage.cost_usd ?? 0)
-          : null,
-    };
-    this.store.saveSession(this.record);
+    this.record.usage = rec.usage;
+    this.store.saveSession(rec);
   }
 
   private emitBlocks(blocks: Block[]): void {

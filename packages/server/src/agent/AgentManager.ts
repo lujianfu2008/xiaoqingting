@@ -1,9 +1,10 @@
 import type { AttachmentImage, ServerMessage, UpdateRequestStatus, UpdateRequestView } from "@blm/protocol";
-import { Store, type SessionRecord } from "../store.js";
+import { Store, type SessionRecord, type TaskRecord } from "../store.js";
 import { AgentSession } from "./AgentSession.js";
 import { ConnectionRegistry } from "./connections.js";
 import { MessageRouter } from "./messageRouter.js";
 import { SessionRegistry } from "./sessionRegistry.js";
+import { TaskManager, type CreateTaskInput, type TaskFlowInput, type FlowResult } from "./taskManager.js";
 import { UpdateRequestManager } from "./updateRequests.js";
 
 // Routes messages between WebSocket connections and per-session agent loops.
@@ -19,12 +20,14 @@ export class AgentManager {
   private registry: SessionRegistry;
   private router: MessageRouter;
   private updateRequests: UpdateRequestManager;
+  private tasks: TaskManager;
 
   constructor(store: Store) {
     this.store = store;
     this.conns = new ConnectionRegistry(store);
     this.registry = new SessionRegistry(store);
     this.updateRequests = new UpdateRequestManager(store, this.conns);
+    this.tasks = new TaskManager(store, this.conns, this.registry);
     this.router = new MessageRouter(store, this.conns, this.sessions, this.updateRequests);
   }
 
@@ -149,12 +152,23 @@ export class AgentManager {
     return this.registry.setShared(userId, sessionId, shared, sharedWith, approvers);
   }
 
-  deleteSession(userId: string, sessionId: string): boolean {
+  deleteSession(
+    userId: string,
+    sessionId: string,
+  ): { ok: true } | { ok: false; code: "not_found" | "task_active" } {
     // Stop the live engine first so it cannot append to a record being removed.
-    if (!this.registry.isOwner(userId, sessionId)) return false;
+    if (!this.registry.isOwner(userId, sessionId)) return { ok: false, code: "not_found" };
+    // 协作流任务线程守卫：任务未完结不可删（防撕掉时间线与共享视图）；
+    // done 后可删，任务记录保留（客户端列表降级灰显）。
+    const rec = this.store.getSession(sessionId);
+    if (rec?.task_id) {
+      const task = this.tasks.getTask(rec.task_id);
+      if (task && task.status !== "done") return { ok: false, code: "task_active" };
+    }
     this.sessions.get(sessionId)?.dispose();
     this.sessions.delete(sessionId);
-    return this.registry.deleteSession(userId, sessionId);
+    this.registry.deleteSession(userId, sessionId);
+    return { ok: true };
   }
 
   moveSession(
@@ -172,6 +186,25 @@ export class AgentManager {
     title: string,
   ): { ok: true; rec: SessionRecord } | { ok: false; code: "not_found" | "forbidden" } {
     return this.registry.renameSession(userId, sessionId, title);
+  }
+
+  // ---------- 协作流任务 ----------
+
+  createTask(userId: string, input: CreateTaskInput): TaskRecord {
+    return this.tasks.createTask(userId, input);
+  }
+
+  flowTask(userId: string, taskId: string, input: TaskFlowInput): FlowResult {
+    return this.tasks.flow(userId, taskId, input);
+  }
+
+  listTasks(userId: string): TaskRecord[] {
+    return this.tasks.listFor(userId);
+  }
+
+  /** WS 连接建立补推：未完结任务。 */
+  activeTasksFor(userId: string): TaskRecord[] {
+    return this.tasks.activeFor(userId);
   }
 
   // ---------- 公有域更新申请 ----------
