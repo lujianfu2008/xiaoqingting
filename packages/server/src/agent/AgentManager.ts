@@ -144,8 +144,9 @@ export class AgentManager {
     sessionId: string,
     shared: boolean,
     sharedWith?: string[],
+    approvers?: string[],
   ): SessionRecord | null {
-    return this.registry.setShared(userId, sessionId, shared, sharedWith);
+    return this.registry.setShared(userId, sessionId, shared, sharedWith, approvers);
   }
 
   deleteSession(userId: string, sessionId: string): boolean {

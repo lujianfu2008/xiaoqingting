@@ -66,6 +66,7 @@ export class MessageRouter {
           project_id: rec.project_id ?? null,
           shared: rec.shared ?? false,
           shared_with: rec.shared_with ?? [],
+          ...(rec.approvers?.length ? { approvers: rec.approvers } : {}),
           owner: rec.user_id,
         },
       });
@@ -114,7 +115,12 @@ export class MessageRouter {
   handlePermissionResponse(userId: string, requestId: string, allow: boolean): void {
     const sid = requestId.split(":")[0];
     const rec = sid ? this.store.getSession(sid) : null;
-    if (!rec || rec.user_id !== userId) return;
+    // 主人或被授权的审批人（approvers，且须共享可见）可应答；先到先结算，
+    // 后到的应答在 PendingMap 上是 no-op。
+    const isApprover =
+      !!rec && rec.user_id !== userId && (rec.approvers ?? []).includes(userId);
+    if (!rec || (rec.user_id !== userId && !(isApprover && rec.shared && sharedWithUser(rec, userId))))
+      return;
     this.sessions.get(sid)?.respondPermission(requestId, allow);
   }
 

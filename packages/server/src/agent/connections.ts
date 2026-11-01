@@ -3,10 +3,6 @@ import { Store, sharedWithUser } from "../store.js";
 
 // Who is connected over WS, and which server messages each connection receives.
 
-// Interactive confirmations must only reach the owner (only the owner can
-// approve local actions on their machine).
-const OWNER_ONLY_MSGS = new Set(["permission_request", "tool_exec_request"]);
-
 export type SendFn = (msg: ServerMessage) => void;
 
 interface Conn {
@@ -79,16 +75,25 @@ export class ConnectionRegistry {
 
   /**
    * Broadcast to the owner, plus every other connected user while the session
-   * is shared. Interactive confirmations (permission/exec popups) always stay
-   * owner-only: only the owner can approve actions on their own machine.
+   * is shared. Local execution (tool_exec_request) stays owner-only — it runs
+   * on the owner's machine. Permission requests additionally reach online
+   * approvers (approvers 字段，须同时是共享可见用户)：谁先应答谁生效。
    */
   broadcastShared(ownerId: string, sessionId: string, msg: ServerMessage): void {
-    if (OWNER_ONLY_MSGS.has(msg.type)) {
+    if (msg.type === "tool_exec_request") {
       this.broadcast(ownerId, msg);
       return;
     }
     this.broadcast(ownerId, msg);
     const rec = this.store.getSession(sessionId);
+    if (msg.type === "permission_request") {
+      if (!rec?.shared) return;
+      for (const uid of rec.approvers ?? []) {
+        if (uid === ownerId || !sharedWithUser(rec, uid) || !this.isOnline(uid)) continue;
+        this.broadcast(uid, msg);
+      }
+      return;
+    }
     if (!rec?.shared) return;
     for (const [uid, set] of this.byUser) {
       if (uid === ownerId || !sharedWithUser(rec, uid)) continue;

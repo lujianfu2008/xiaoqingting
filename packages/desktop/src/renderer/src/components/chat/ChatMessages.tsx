@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Block } from "@blm/protocol";
 import { useT } from "../../i18n";
 import { MessageBlock, StreamingMessage } from "./MessageBlock";
@@ -21,6 +22,20 @@ export function ChatMessages({
   bottomRef,
 }: ChatMessagesProps): React.JSX.Element {
   const t = useT();
+  // 任务清单已结构化渲染：TodoWrite 的配对 tool_result（迟到一个消息）按
+  // id 前联隐藏，时间线只剩 📋 清单。旧历史没有 task_list 块，原样渲染。
+  const hiddenIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const b of blocks) if (b.kind === "task_list") ids.add(b.id);
+    return ids;
+  }, [blocks]);
+  const visible =
+    hiddenIds.size === 0
+      ? blocks
+      : blocks.filter(
+          (b) =>
+            !((b.kind === "tool_call" || b.kind === "tool_result") && hiddenIds.has(b.id)),
+        );
   return (
     <div className="chat">
       {blocks.length === 0 && !streamingText && (
@@ -28,7 +43,7 @@ export function ChatMessages({
           {noSession ? t("chat.noSession") : t("chat.empty")}
         </div>
       )}
-      {blocks.map((b, i) => (
+      {visible.map((b, i) => (
         <MessageBlock key={i} block={b} />
       ))}
       {streamingText && <StreamingMessage text={streamingText} />}

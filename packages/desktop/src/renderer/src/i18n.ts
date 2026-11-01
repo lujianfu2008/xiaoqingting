@@ -439,6 +439,10 @@ export const DICT = {
     "sh.unshare": "取消共享",
     "sh.save": "保存",
     "sh.share": "共享",
+    "sh.approvers": "可代为确认的审批人",
+    "sh.approversTip": "勾选后，这些人在线时会同步收到本会话的操作审批弹窗，谁先确认谁生效；本机执行始终由你完成。",
+    "sh.approversNeedPicked": "请先在上方勾选共享对象",
+    "chat.taskList": "任务清单",
     // 公有域项目（共有知识库）
     "proj.publicSection": "公有域项目",
     "proj.publicTip": "公有域知识库 · 创建者 {owner} · 全员可查询；普通成员写入需管理员审核",
@@ -985,6 +989,10 @@ export const DICT = {
     "sh.unshare": "Unshare",
     "sh.save": "Save",
     "sh.share": "Share",
+    "sh.approvers": "Delegated approvers",
+    "sh.approversTip": "Picked users also receive this session's approval prompts while online; first answer wins. Local execution always runs on your machine.",
+    "sh.approversNeedPicked": "Pick share targets above first",
+    "chat.taskList": "Task list",
     // Public-domain projects (shared knowledge base)
     "proj.publicSection": "Public projects",
     "proj.publicTip": "Public knowledge base · created by {owner} · readable by everyone; member writes need admin approval",

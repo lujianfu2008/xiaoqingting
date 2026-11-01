@@ -152,13 +152,19 @@ export function registerSessionRoutes(
 
   // Knowledge sharing: toggle sharing of one of my sessions, optionally
   // restricted to a list of usernames (empty/absent list = everyone).
+  // approvers：可代为确认审批的成员（在线时同步收到审批弹窗）。
   app.post("/api/sessions/:id/share", (req, reply) => {
     const parsed = ShareSessionRequest.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
-    const { shared, shared_with } = parsed.data;
-    const rec = manager.setShared(req.userId, (req.params as { id: string }).id, shared, shared_with);
+    const { shared, shared_with, approvers } = parsed.data;
+    const rec = manager.setShared(req.userId, (req.params as { id: string }).id, shared, shared_with, approvers);
     if (!rec) return reply.code(404).send({ error: "not_found" });
-    return { session_id: rec.session_id, shared: rec.shared ?? false, shared_with: rec.shared_with ?? [] };
+    return {
+      session_id: rec.session_id,
+      shared: rec.shared ?? false,
+      shared_with: rec.shared_with ?? [],
+      approvers: rec.approvers ?? [],
+    };
   });
 
   // Sessions other users have shared with me.

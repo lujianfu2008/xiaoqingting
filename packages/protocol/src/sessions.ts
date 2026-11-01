@@ -23,6 +23,10 @@ export const SessionMeta = z.object({
   shared: z.boolean().optional(),
   // Empty/absent = shared with everyone; otherwise only these usernames.
   shared_with: z.array(z.string()).optional(),
+  // 可代为确认审批的成员（并行字段，不改 shared_with 结构）：这些共享对象
+  // 在线时会同时收到 permission_request，谁先应答谁生效（后到的应答为 no-op）。
+  // 本机执行（tool_exec）始终仅限会话主人。空/缺省 = 只有主人可审批。
+  approvers: z.array(z.string()).optional(),
   // Present in shared-session listings: username of the owner.
   owner: z.string().optional(),
   // Present in shared-session listings: whether the owner currently has a

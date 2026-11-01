@@ -64,18 +64,26 @@ export class SessionRegistry {
       .map((s) => ({ ...s, owner_online: isOnline(s.owner ?? "") }));
   }
 
-  /** Toggle sharing on the user's own session. Returns false if not owner. */
+  /** Toggle sharing on the user's own session. Returns false if not owner.
+   *  approvers：可代为确认审批的成员（审批路由并行字段，不影响可见性）。 */
   setShared(
     userId: string,
     sessionId: string,
     shared: boolean,
     sharedWith?: string[],
+    approvers?: string[],
   ): SessionRecord | null {
     const rec = this.store.getSession(sessionId);
     if (!rec || rec.user_id !== userId) return null;
     rec.shared = shared;
-    if (shared) rec.shared_with = sharedWith ?? [];
-    else delete rec.shared_with;
+    if (shared) {
+      rec.shared_with = sharedWith ?? [];
+      if (approvers && approvers.length > 0) rec.approvers = approvers;
+      else delete rec.approvers;
+    } else {
+      delete rec.shared_with;
+      delete rec.approvers;
+    }
     this.store.saveSession(rec);
     return rec;
   }

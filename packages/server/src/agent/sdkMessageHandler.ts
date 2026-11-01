@@ -1,5 +1,13 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { Block, ServerMessage, ToolCallBlock, ToolResultBlock, Usage } from "@blm/protocol";
+import type {
+  Block,
+  ServerMessage,
+  TaskListBlock,
+  TaskListItem,
+  ToolCallBlock,
+  ToolResultBlock,
+  Usage,
+} from "@blm/protocol";
 import { config } from "../config.js";
 import { sanitizeToolName } from "./mcp.js";
 import { subagentName } from "./subagents.js";
@@ -44,6 +52,23 @@ function subagentAttrib(message: {
     ...(key ? { agent_id: key, agent_name: subagentName(key) } : {}),
     ...(parent != null ? { parent_tool_call_id: parent } : {}),
   };
+}
+
+/** TodoWrite 输入 → 结构化任务清单；形状不符返回 null（调用方回退渲染原始
+ *  tool_call 行）。团队共享进度看板的数据来源。 */
+function todoItems(input: unknown): TaskListItem[] | null {
+  const todos = (input as { todos?: unknown } | null)?.todos;
+  if (!Array.isArray(todos)) return null;
+  const items: TaskListItem[] = [];
+  for (const t of todos) {
+    if (typeof t !== "object" || t === null) return null;
+    const content = (t as { content?: unknown }).content;
+    const status = (t as { status?: unknown }).status;
+    if (typeof content !== "string" || content.trim().length === 0) return null;
+    if (status !== "pending" && status !== "in_progress" && status !== "completed") return null;
+    items.push({ content, status });
+  }
+  return items.length > 0 ? items : null;
 }
 
 /** Translate one raw SDK message into protocol blocks / events. */
@@ -96,6 +121,18 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
           if (attrib.agent_id) continue;
           blocks.push(makeTextBlock(part.text));
         } else if (part.type === "tool_use") {
+          // TodoWrite 走结构化任务清单（共享进度看板），不再下发原始 tool_call；
+          // 输入形状意外时不映射，回退普通 tool_call 渲染。
+          const todo = part.name === "TodoWrite" ? todoItems(part.input) : null;
+          if (todo) {
+            blocks.push({
+              kind: "task_list",
+              id: part.id,
+              items: todo,
+              ...attrib,
+            } satisfies TaskListBlock);
+            continue;
+          }
           blocks.push({
             kind: "tool_call",
             id: part.id,

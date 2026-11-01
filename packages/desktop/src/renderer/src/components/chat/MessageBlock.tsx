@@ -62,6 +62,26 @@ function ToolResult({ block }: { block: Extract<Block, { kind: "tool_result" }> 
   );
 }
 
+// 任务清单（共享进度看板）：TodoWrite 的结构化渲染，取代 🔧 原始行。
+function TaskList({ block }: { block: Extract<Block, { kind: "task_list" }> }): React.JSX.Element {
+  const t = useT();
+  return (
+    <div className="tool-block">
+      <AgentBadge block={block} />
+      📋 {t("chat.taskList")}
+      {block.items.map((it, i) => (
+        <div
+          key={i}
+          style={{ marginTop: 2, opacity: it.status === "completed" ? 0.55 : 1 }}
+        >
+          {it.status === "completed" ? "✅" : it.status === "in_progress" ? "🔨" : "☐"}{" "}
+          {it.status === "in_progress" ? <b>{it.content}</b> : it.content}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function MessageBlock({ block }: { block: Block }): React.JSX.Element {
 switch (block.kind) {
 case "user_text":
@@ -85,6 +105,8 @@ return (
 }
 case "tool_result":
 return <ToolResult block={block} />;
+case "task_list":
+return <TaskList block={block} />;
 }
 }
 

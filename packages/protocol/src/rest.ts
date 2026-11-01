@@ -99,6 +99,8 @@ export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
 export const ShareSessionRequest = z.object({
   shared: z.boolean(),
   shared_with: z.array(z.string()).optional(),
+  // 可代为确认审批的成员（须同时是共享可见用户；见 SessionMeta.approvers）。
+  approvers: z.array(z.string()).optional(),
 });
 export type ShareSessionRequest = z.infer<typeof ShareSessionRequest>;
 

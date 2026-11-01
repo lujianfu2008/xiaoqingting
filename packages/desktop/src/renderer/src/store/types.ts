@@ -163,7 +163,7 @@ export interface BlmState {
   loadAuditLog(limit?: number): Promise<boolean>;
   selectSession(id: string): Promise<void>;
   selectSharedSession(id: string): Promise<void>;
-  setSessionShare(id: string, shared: boolean, sharedWith?: string[]): Promise<void>;
+  setSessionShare(id: string, shared: boolean, sharedWith?: string[], approvers?: string[]): Promise<void>;
   listUsers(): Promise<UserSummary[]>;
   loadShared(): Promise<void>;
   ownerOnlineOf(sessionId: string): boolean;

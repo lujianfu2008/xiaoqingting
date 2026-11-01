@@ -41,10 +41,30 @@ export const ToolResultBlock = z.object({
 });
 export type ToolResultBlock = z.infer<typeof ToolResultBlock>;
 
+// 任务清单（团队共享进度看板）：服务端把 TodoWrite 的 tool_use 输入结构化，
+// 客户端渲染成勾选清单而非 🔧 原始行。id = 对应 TodoWrite 的 tool_use id，
+// 客户端据此前联隐藏迟到的配对 tool_result（服务端不再下发其 tool_call）。
+export const TaskListItem = z.object({
+  content: z.string(),
+  status: z.enum(["pending", "in_progress", "completed"]),
+});
+export type TaskListItem = z.infer<typeof TaskListItem>;
+
+export const TaskListBlock = z.object({
+  kind: z.literal("task_list"),
+  id: z.string(),
+  items: z.array(TaskListItem),
+  agent_id: z.string().optional(), // 子代理内的清单（researcher/coder 也有 TodoWrite）
+  agent_name: z.string().optional(),
+  parent_tool_call_id: z.string().optional(),
+});
+export type TaskListBlock = z.infer<typeof TaskListBlock>;
+
 export const Block = z.discriminatedUnion("kind", [
   UserTextBlock,
   TextBlock,
   ToolCallBlock,
   ToolResultBlock,
+  TaskListBlock,
 ]);
 export type Block = z.infer<typeof Block>;

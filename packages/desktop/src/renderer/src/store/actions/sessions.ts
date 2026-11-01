@@ -95,18 +95,27 @@ export function createSessionActions(
       set({ sharedView: true });
     },
 
-    async setSessionShare(id, shared, sharedWith) {
+    async setSessionShare(id, shared, sharedWith, approvers) {
       const { serverUrl, token } = get();
       const res = await fetch(`${apiBase(serverUrl)}/api/sessions/${id}/share`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(shared ? { shared, shared_with: sharedWith ?? [] } : { shared }),
+        body: JSON.stringify(
+          shared
+            ? { shared, shared_with: sharedWith ?? [], approvers: approvers ?? [] }
+            : { shared },
+        ),
       });
       if (!res.ok) return;
       set((s) => ({
         sessions: s.sessions.map((x) =>
           x.session_id === id
-            ? { ...x, shared, shared_with: shared ? (sharedWith ?? []) : [] }
+            ? {
+                ...x,
+                shared,
+                shared_with: shared ? (sharedWith ?? []) : [],
+                approvers: shared && approvers && approvers.length > 0 ? approvers : [],
+              }
             : x,
         ),
       }));

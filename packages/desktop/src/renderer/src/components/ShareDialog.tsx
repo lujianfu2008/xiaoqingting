@@ -22,6 +22,8 @@ export function ShareDialog({
     (session.shared_with?.length ?? 0) > 0 ? "picked" : "everyone",
   );
   const [picked, setPicked] = useState<Set<string>>(new Set(session.shared_with ?? []));
+  // 可代为确认审批的成员（团队工作流）：在线时同步收到审批弹窗，先答先生效。
+  const [approvers, setApprovers] = useState<Set<string>>(new Set(session.approvers ?? []));
   const [busy, setBusy] = useState(false);
   const t = useT();
 
@@ -36,16 +38,39 @@ export function ShareDialog({
       const next = new Set(prev);
       if (next.has(u)) next.delete(u);
       else next.add(u);
+      // 取消共享对象时同步摘掉审批授权（审批人必须是共享可见用户）。
+      setApprovers((a) => {
+        if (!a.has(u)) return a;
+        const n = new Set(a);
+        n.delete(u);
+        return n;
+      });
       return next;
     });
   };
 
+  const toggleApprover = (u: string): void => {
+    setApprovers((prev) => {
+      const next = new Set(prev);
+      if (next.has(u)) next.delete(u);
+      else next.add(u);
+      return next;
+    });
+  };
+
+  // 审批人候选：指定模式=已勾选的共享对象；所有人模式=全部用户。
+  const approverCandidates =
+    mode === "picked" ? users.filter((u) => picked.has(u.username)) : users;
+
   const save = async (): Promise<void> => {
     setBusy(true);
+    const approverList =
+      mode === "everyone" ? [...approvers] : [...approvers].filter((u) => picked.has(u));
     await setSessionShare(
       session.session_id,
       true,
       mode === "everyone" ? [] : [...picked],
+      approverList,
     );
     setBusy(false);
     onClose();
@@ -111,6 +136,42 @@ export function ShareDialog({
             ))}
           </div>
         )}
+
+        <div className="field" style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+            {t("sh.approvers")}
+          </div>
+          <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 6 }}>
+            {t("sh.approversTip")}
+          </div>
+          {mode === "picked" && picked.size === 0 ? (
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>{t("sh.approversNeedPicked")}</div>
+          ) : (
+            <div
+              style={{ maxHeight: 140, overflowY: "auto", border: "1px solid var(--border, #444)", borderRadius: 6, padding: 8 }}
+            >
+              {approverCandidates.length === 0 && (
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>{t("sh.noUsers")}</div>
+              )}
+              {approverCandidates.map((u) => (
+                <label
+                  key={u.username}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={approvers.has(u.username)}
+                    onChange={() => toggleApprover(u.username)}
+                  />
+                  <span className={`status-dot ${u.online ? "ok" : "bad"}`} title={u.online ? t("sh.online") : t("sess.offline")} />
+                  <span>
+                    {u.employee_id} · {u.username}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="actions">
           {session.shared && (

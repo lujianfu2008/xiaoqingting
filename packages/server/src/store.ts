@@ -132,6 +132,7 @@ export class Store {
       project_id: rec.project_id ?? null,
       shared: rec.shared ?? false,
       shared_with: rec.shared_with ?? [],
+      ...(rec.approvers?.length ? { approvers: rec.approvers } : {}),
       ...(owner ? { owner } : {}),
     };
   }
