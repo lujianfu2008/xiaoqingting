@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Block } from "@blm/protocol";
+import type { Block, FlowAction, TaskStatus } from "@blm/protocol";
 import { useT } from "../../i18n";
 
 // hover 复制按钮：点击写入剪贴板，短暂显示「已复制」。
@@ -82,6 +82,35 @@ function TaskList({ block }: { block: Extract<Block, { kind: "task_list" }> }): 
   );
 }
 
+// 协作流状态/动作的中文标签（FlowBar 与事件行共用）。
+export const FLOW_STATUS_LABEL: Record<TaskStatus, string> = {
+  analyzing: "需求分析",
+  developing: "研发中",
+  fixing: "修复中",
+  testing: "测试中",
+  done: "已完成",
+};
+export const FLOW_ACTION_LABEL: Record<FlowAction, string> = {
+  assign_dev: "指派研发",
+  submit_test: "提交测试",
+  assign_tester: "指派测试",
+  report_issue: "反馈问题",
+  resubmit: "重新提测",
+  pass: "测试通过",
+};
+
+// 协作流事件行：谁把任务从什么状态推进到什么状态（任务线程时间线）。
+function FlowEventLine({ block }: { block: Extract<Block, { kind: "flow_event" }> }): React.JSX.Element {
+  const targets = block.targets?.length ? ` → ${block.targets.join("、")}` : "";
+  return (
+    <div className="tool-block flow-event">
+      🔄 {block.actor} {FLOW_ACTION_LABEL[block.action]}
+      {targets}（{FLOW_STATUS_LABEL[block.from_status]} → {FLOW_STATUS_LABEL[block.to_status]}）
+      {block.note ? <div style={{ opacity: 0.8, marginTop: 2 }}>💬 {block.note}</div> : null}
+    </div>
+  );
+}
+
 export function MessageBlock({ block }: { block: Block }): React.JSX.Element {
 switch (block.kind) {
 case "user_text":
@@ -107,6 +136,8 @@ case "tool_result":
 return <ToolResult block={block} />;
 case "task_list":
 return <TaskList block={block} />;
+case "flow_event":
+return <FlowEventLine block={block} />;
 }
 }
 

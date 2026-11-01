@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FlowAction, TaskStatus } from "./tasks.js";
 
 // ---------- Blocks (chat message content) ----------
 
@@ -60,11 +61,29 @@ export const TaskListBlock = z.object({
 });
 export type TaskListBlock = z.infer<typeof TaskListBlock>;
 
+// 协作流事件（任务线程内的流转记录）：谁把任务从什么状态推进到什么状态。
+// 追加进会话历史，兼作时间线展示与流转凭证。
+export const FlowEventBlock = z.object({
+  kind: z.literal("flow_event"),
+  id: z.string(),
+  task_id: z.string(),
+  task_title: z.string(),
+  actor: z.string(), // 操作人用户名
+  action: FlowAction,
+  from_status: TaskStatus,
+  to_status: TaskStatus,
+  targets: z.array(z.string()).optional(), // 动作涉及的用户（如新指派的研发/测试）
+  note: z.string().optional(),
+  ts: z.string(),
+});
+export type FlowEventBlock = z.infer<typeof FlowEventBlock>;
+
 export const Block = z.discriminatedUnion("kind", [
   UserTextBlock,
   TextBlock,
   ToolCallBlock,
   ToolResultBlock,
   TaskListBlock,
+  FlowEventBlock,
 ]);
 export type Block = z.infer<typeof Block>;

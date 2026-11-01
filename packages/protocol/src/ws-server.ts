@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Block } from "./blocks.js";
 import { SessionMeta, Usage } from "./sessions.js";
 import { UpdateRequestView } from "./public.js";
+import { TaskView } from "./tasks.js";
 
 // ---------- Server -> Client (WebSocket) ----------
 
@@ -105,6 +106,13 @@ export const WsReviewRequest = z.object({
 });
 export type WsReviewRequest = z.infer<typeof WsReviewRequest>;
 
+// 协作流任务变更：推给任务相关人（需求方/研发/测试），连接建立时补推活跃任务。
+export const WsTaskUpdate = z.object({
+  type: z.literal("task_update"),
+  task: TaskView,
+});
+export type WsTaskUpdate = z.infer<typeof WsTaskUpdate>;
+
 export const ServerMessage = z.discriminatedUnion("type", [
   WsMessageDelta,
   WsMessageBlock,
@@ -118,5 +126,6 @@ export const ServerMessage = z.discriminatedUnion("type", [
   WsUpdateRequest,
   WsUpdateRequestDecided,
   WsReviewRequest,
+  WsTaskUpdate,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;

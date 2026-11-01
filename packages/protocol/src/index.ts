@@ -8,4 +8,5 @@ export * from "./mcp.js";
 export * from "./skills.js";
 export * from "./relay.js";
 export * from "./public.js";
+export * from "./tasks.js";
 export * from "./desktop.js";
