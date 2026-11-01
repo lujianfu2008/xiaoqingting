@@ -15,6 +15,13 @@ export class ConnectionRegistry {
   private store: Store;
   private byUser = new Map<string, Set<Conn>>();
 
+  /**
+   * 会话 → 当前负责人（工作台跟随指派）。由 AgentManager 在 TaskManager
+   * 构造完成后注入（两者互需引用，晚绑定避免循环构造）；无任务返回 null，
+   * 路由回退会话主人。
+   */
+  execTargetResolver: ((sessionId: string) => string | null) | null = null;
+
   constructor(store: Store) {
     this.store = store;
   }
@@ -75,21 +82,35 @@ export class ConnectionRegistry {
 
   /**
    * Broadcast to the owner, plus every other connected user while the session
-   * is shared. Local execution (tool_exec_request) stays owner-only — it runs
-   * on the owner's machine. Permission requests additionally reach online
-   * approvers (approvers 字段，须同时是共享可见用户)：谁先应答谁生效。
+   * is shared. Local execution (tool_exec_request) goes to the session's
+   * current executor (工作台跟随指派) — it runs on that user's machine, falling
+   * back to the owner for non-task sessions. Permission requests additionally
+   * reach the online executor and online approvers (approvers 字段，须同时是
+   * 共享可见用户)：谁先应答谁生效。
    */
   broadcastShared(ownerId: string, sessionId: string, msg: ServerMessage): void {
     if (msg.type === "tool_exec_request") {
-      this.broadcast(ownerId, msg);
+      const target = this.execTargetResolver?.(sessionId) ?? ownerId;
+      this.broadcast(target, msg);
       return;
     }
     this.broadcast(ownerId, msg);
     const rec = this.store.getSession(sessionId);
     if (msg.type === "permission_request") {
+      const executor = this.execTargetResolver?.(sessionId);
+      if (executor && executor !== ownerId && this.isOnline(executor)) {
+        this.broadcast(executor, msg);
+      }
       if (!rec?.shared) return;
       for (const uid of rec.approvers ?? []) {
-        if (uid === ownerId || !sharedWithUser(rec, uid) || !this.isOnline(uid)) continue;
+        if (
+          uid === ownerId ||
+          uid === executor ||
+          !sharedWithUser(rec, uid) ||
+          !this.isOnline(uid)
+        ) {
+          continue;
+        }
         this.broadcast(uid, msg);
       }
       return;

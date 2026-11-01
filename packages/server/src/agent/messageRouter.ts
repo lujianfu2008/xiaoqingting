@@ -2,10 +2,12 @@ import type { AttachmentImage } from "@blm/protocol";
 import { Store, sharedWithUser } from "../store.js";
 import { AgentSession } from "./AgentSession.js";
 import type { ConnectionRegistry } from "./connections.js";
+import type { TaskManager } from "./taskManager.js";
 import type { UpdateRequestManager } from "./updateRequests.js";
 
 // WS message routing: chat turns, interrupts, permission answers and local
-// execution results, each gated by session ownership/sharing.
+// execution results, each gated by session ownership/sharing. 协作流任务线程
+// 的执行面（发言守卫/审批/本机执行/中断）跟随当前负责人（工作台跟随指派）。
 
 export class MessageRouter {
   private store: Store;
@@ -17,10 +19,16 @@ export class MessageRouter {
     conns: ConnectionRegistry,
     sessions: Map<string, AgentSession>,
     private updateRequests: UpdateRequestManager,
+    private tasks: TaskManager,
   ) {
     this.store = store;
     this.conns = conns;
     this.sessions = sessions;
+  }
+
+  /** 当前负责人（无任务回退主人）；协作线程执行面的目标用户。 */
+  private executorOf(sessionId: string, rec: { user_id: string }): string {
+    return this.tasks.executorOf(sessionId) ?? rec.user_id;
   }
 
   /** Handle a user chat message over WS. Lazily (re)starts the session loop, resuming engine state. */
@@ -37,15 +45,23 @@ export class MessageRouter {
       return;
     }
 
-    // Collaborators cannot make progress without the owner: tool approvals and
-    // local execution requests are owner-only, so fail fast instead of letting
-    // the engine stall on a 120s client-exec timeout.
-    if (rec.user_id !== userId && !this.conns.isOnline(rec.user_id)) {
+    // 协作者要推进线程，得有人能应答审批/本机执行——即当前负责人。负责人
+    // 不在线时快速失败（owner 与负责人本人始终可发言），避免引擎卡在本机
+    // 执行超时上。
+    const executor = this.executorOf(sessionId, rec);
+    if (
+      rec.user_id !== userId &&
+      userId !== executor &&
+      !this.conns.isOnline(executor)
+    ) {
       this.conns.broadcast(userId, {
         type: "error",
         session_id: sessionId,
-        code: "owner_offline",
-        message: "会话主人当前不在线，暂时无法发言，请稍后再试。",
+        code: "executor_offline",
+        message:
+          executor === rec.user_id
+            ? "会话主人当前不在线，暂时无法发言，请稍后再试。"
+            : "当前负责人不在线，暂时无法发言，请稍后再试。",
       });
       return;
     }
@@ -91,7 +107,10 @@ export class MessageRouter {
         this.store,
         {
           send: (msg) => this.conns.broadcastShared(rec.user_id, sessionId, msg),
-          isOwnerOnline: () => this.conns.isOnline(rec.user_id),
+          // 本机执行的 fail-fast 判的是当前负责人在线状态（随任务流转动态
+          // 变化，故每次调用现查）。
+          isExecutorOnline: () =>
+            this.conns.isOnline(this.executorOf(sessionId, rec)),
           // 空闲回收/引擎退出时把会话从 Map 摘除：下一条消息走新建 + resume，
           // 而不是把消息推进死队列被静默吞掉。
           onDispose: () => {
@@ -108,19 +127,25 @@ export class MessageRouter {
 
   handleInterrupt(userId: string, sessionId: string): void {
     const rec = this.store.getSession(sessionId);
-    if (!rec || rec.user_id !== userId) return;
+    // 主人或当前负责人可中断引擎（负责人在自己的工作台上驱动 agent，要能停）。
+    const executor = rec ? this.executorOf(sessionId, rec) : null;
+    if (!rec || (rec.user_id !== userId && userId !== executor)) return;
     void this.sessions.get(sessionId)?.interrupt();
   }
 
   handlePermissionResponse(userId: string, requestId: string, allow: boolean): void {
     const sid = requestId.split(":")[0];
     const rec = sid ? this.store.getSession(sid) : null;
-    // 主人或被授权的审批人（approvers，且须共享可见）可应答；先到先结算，
-    // 后到的应答在 PendingMap 上是 no-op。
+    if (!rec) return;
+    // 可应答者：主人、被授权的审批人（approvers，且须共享可见）、当前负责人
+    // （工作台跟随指派）。先到先结算，后到的应答在 PendingMap 上是 no-op。
     const isApprover =
-      !!rec && rec.user_id !== userId && (rec.approvers ?? []).includes(userId);
-    if (!rec || (rec.user_id !== userId && !(isApprover && rec.shared && sharedWithUser(rec, userId))))
-      return;
+      rec.user_id !== userId &&
+      (rec.approvers ?? []).includes(userId) &&
+      rec.shared &&
+      sharedWithUser(rec, userId);
+    const isExecutor = this.executorOf(sid, rec) === userId;
+    if (rec.user_id !== userId && !isApprover && !isExecutor) return;
     this.sessions.get(sid)?.respondPermission(requestId, allow);
   }
 
@@ -132,7 +157,11 @@ export class MessageRouter {
   ): void {
     const sid = requestId.split(":")[0];
     const rec = sid ? this.store.getSession(sid) : null;
-    if (!rec || rec.user_id !== userId) return;
+    if (!rec) return;
+    // 结果来自当前负责人的客户端；主人的应答也接受——防流转瞬间的边界下
+    // （请求发给旧负责人、应答迟到）结果被静默丢弃。
+    const executor = this.executorOf(sid, rec);
+    if (rec.user_id !== userId && userId !== executor) return;
     this.sessions.get(sid)?.respondExec(requestId, result);
   }
 }

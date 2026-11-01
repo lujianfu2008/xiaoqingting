@@ -20,8 +20,8 @@ interface PermissionVerdict {
 
 export interface ClientRequestEvents {
   send(msg: ServerMessage): void;
-  /** Whether the session owner (who must approve local actions) is connected. */
-  isOwnerOnline?: () => boolean;
+  /** 当前负责人（本机操作的执行者，工作台跟随指派）是否在线。 */
+  isExecutorOnline?: () => boolean;
 }
 
 export class ClientRequests {
@@ -93,12 +93,12 @@ export class ClientRequests {
     if (this.isDisposed()) {
       return Promise.resolve({ ok: false, error: "会话已关闭。" });
     }
-    // Local actions can only be performed by the session owner's client. If they
-    // are offline, fail now instead of waiting for the full client timeout.
-    if (this.events.isOwnerOnline && !this.events.isOwnerOnline()) {
+    // Local actions run on the current executor's client (工作台跟随指派). If
+    // they are offline, fail now instead of waiting for the full client timeout.
+    if (this.events.isExecutorOnline && !this.events.isExecutorOnline()) {
       return Promise.resolve({
         ok: false,
-        error: "会话主人不在线，无法执行本机操作。请在主人上线后重试。",
+        error: "当前负责人不在线，无法执行本机操作。请稍后再试。",
       });
     }
     const requestId = this.pendingExecs.nextId();

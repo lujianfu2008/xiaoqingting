@@ -212,6 +212,27 @@ export class TaskManager {
     return this.store.getTask(taskId);
   }
 
+  /**
+   * 会话当前负责人：工作台跟随指派——agent 的本机执行、审批应答、发言守卫、
+   * 中断权都跟随此用户，其桌面端所在机器就是当前工作台。无任务（或任务记录
+   * 缺失）返回 null，调用方回退会话主人，行为与旧版一致。
+   */
+  executorOf(sessionId: string): string | null {
+    const taskId = this.store.getSession(sessionId)?.task_id;
+    if (!taskId) return null;
+    const rec = this.store.getTask(taskId);
+    if (!rec) return null;
+    switch (rec.status) {
+      case "developing":
+      case "fixing":
+        return rec.dev ?? rec.requester;
+      case "testing":
+        return rec.tester ?? rec.dev ?? rec.requester;
+      default: // analyzing / done
+        return rec.requester;
+    }
+  }
+
   /** 流转事件写进会话历史（时间线），并广播给所有共享可见用户。 */
   private appendFlowEvent(
     rec: TaskRecord,

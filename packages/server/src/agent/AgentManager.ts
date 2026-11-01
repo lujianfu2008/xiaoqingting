@@ -28,7 +28,9 @@ export class AgentManager {
     this.registry = new SessionRegistry(store);
     this.updateRequests = new UpdateRequestManager(store, this.conns);
     this.tasks = new TaskManager(store, this.conns, this.registry);
-    this.router = new MessageRouter(store, this.conns, this.sessions, this.updateRequests);
+    // 工作台跟随指派：本机执行/审批的目标由任务当前负责人决定（晚绑定防循环构造）。
+    this.conns.execTargetResolver = (sid) => this.tasks.executorOf(sid);
+    this.router = new MessageRouter(store, this.conns, this.sessions, this.updateRequests, this.tasks);
   }
 
   // ---------- connections ----------

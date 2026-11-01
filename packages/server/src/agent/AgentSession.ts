@@ -14,8 +14,8 @@ import type { UpdateRequestManager } from "./updateRequests.js";
 
 export interface SessionEvents {
   send(msg: ServerMessage): void;
-  /** Whether the session owner (who must approve local actions) is connected. */
-  isOwnerOnline?: () => boolean;
+  /** 当前负责人（本机操作的执行者，工作台跟随指派）是否在线。 */
+  isExecutorOnline?: () => boolean;
   /** Called once on dispose（空闲回收/引擎循环退出）so the holder can drop it
    *  from its session map — a dead session left in the map would silently
    *  swallow every later message pushed into its queue. */
