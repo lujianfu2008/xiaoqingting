@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { LS } from "../store/persist";
 import { ChatMessages } from "./chat/ChatMessages";
+import { FlowBar } from "./chat/FlowBar";
 import { useVoiceInput } from "./chat/useVoiceInput";
 import { PaneTools, type PaneChrome } from "./pane/PaneTools";
 import { Splitter } from "./Splitter";
@@ -32,6 +33,10 @@ dataUrl?: string; // small thumbnail for image chips
 
 export function ChatPane(props: { chrome?: PaneChrome }): React.JSX.Element {
 const currentSessionId = useStore((s) => s.currentSessionId);
+// 当前会话绑定的协作流任务（普通会话为 undefined，流程条不渲染）。
+const task = useStore((s) =>
+s.currentSessionId ? s.tasks.find((x) => x.session_id === s.currentSessionId) : undefined,
+);
 const sharedView = useStore((s) => s.sharedView);
 const sharedOwner = useStore(
 (s) => s.sharedSessions.find((x) => x.session_id === s.currentSessionId)?.owner ?? null,
@@ -228,6 +233,7 @@ void addFiles(files);
 }}
 >
 {props.chrome && <PaneTools {...props.chrome} floating />}
+{task && <FlowBar task={task} />}
 <ChatMessages
 blocks={blocks}
 streamingText={streamingText}

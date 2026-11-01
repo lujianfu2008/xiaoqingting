@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import type { Block, ProjectMeta, SessionMeta } from "@blm/protocol";
+import type { Block, ProjectMeta, SessionMeta, TaskStatus, TaskView } from "@blm/protocol";
 import { useStore } from "../../store";
 import { apiBase } from "../../store/http";
 import { useT } from "../../i18n";
 import { blocksToMarkdown } from "../../lib/exportMarkdown";
+import { FLOW_STATUS_LABEL } from "../chat/MessageBlock";
+import { NewTaskDialog } from "./NewTaskDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 
 // My sessions grouped by project (default space last), then shared (read-only)
@@ -155,6 +157,58 @@ const groupHeaderStyle = {
   padding: "0 8px",
 } as const;
 
+// 协作任务状态徽标配色（与 UpdateRequestsDialog 的状态色一致风格）。
+const TASK_STATUS_COLOR: Record<TaskStatus, string> = {
+  analyzing: "#4aa3ff",
+  developing: "#e5a83a",
+  fixing: "#e5614e",
+  testing: "#a06ae8",
+  done: "#4aa36a",
+};
+
+// 协作任务行：标题 + 我的角色角标 + 状态徽标；done 灰显。点击进线程：
+// 自己是需求方走本人会话，否则走共享只读视图。
+function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
+  const me = useStore((s) => s.username);
+  const currentSessionId = useStore((s) => s.currentSessionId);
+  const selectSession = useStore((s) => s.selectSession);
+  const selectSharedSession = useStore((s) => s.selectSharedSession);
+  const t = useT();
+  const roles: string[] = [];
+  if (task.requester === me) roles.push(t("task.tagRequester"));
+  if (task.dev === me) roles.push(t("task.tagDev"));
+  if (task.tester === me) roles.push(t("task.tagTester"));
+  const mine = task.requester === me;
+  return (
+    <div
+      className={`session-item ${task.session_id === currentSessionId ? "active" : ""}`}
+      style={task.status === "done" ? { opacity: 0.55 } : undefined}
+      title={`${t("task.roleRequester")}: ${task.requester}${task.dev ? ` · ${t("task.roleDev")}: ${task.dev}` : ""}${task.tester ? ` · ${t("task.roleTester")}: ${task.tester}` : ""}`}
+      onClick={() => void (mine ? selectSession(task.session_id) : selectSharedSession(task.session_id))}
+    >
+      <span className="title">{task.title}</span>
+      {roles.length > 0 && (
+        <span
+          style={{
+            fontSize: 10,
+            color: "#4aa3ff",
+            border: "1px solid rgba(74,163,255,.4)",
+            borderRadius: 999,
+            padding: "0 5px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {roles.join("/")}
+        </span>
+      )}
+      <span style={{ fontSize: 11, color: TASK_STATUS_COLOR[task.status], whiteSpace: "nowrap" }}>
+        {FLOW_STATUS_LABEL[task.status]}
+      </span>
+      {!mine && <span className="offline-tip">{task.requester}</span>}
+    </div>
+  );
+}
+
 function ProjectGroup({
   project,
   sessions,
@@ -274,12 +328,16 @@ export function SessionList({
   const sessions = useStore((s) => s.sessions);
   const projects = useStore((s) => s.projects);
   const sharedSessions = useStore((s) => s.sharedSessions);
+  const tasks = useStore((s) => s.tasks);
   const currentSessionId = useStore((s) => s.currentSessionId);
   const sharedView = useStore((s) => s.sharedView);
   const selectSharedSession = useStore((s) => s.selectSharedSession);
   const presence = useStore((s) => s.presence);
   const moveSession = useStore((s) => s.moveSession);
   const t = useT();
+
+  // 协作任务分区 + 「＋新任务」弹窗。
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
 
   // Right-click "move to project" menu state (viewport coords).
   const [moveMenu, setMoveMenu] = useState<{
@@ -318,9 +376,16 @@ export function SessionList({
   const emptyGroup = (p: ProjectMeta): boolean => (byProject.get(p.project_id) ?? []).length === 0;
   const visiblePersonal = q ? personalProjects.filter((p) => !emptyGroup(p)) : personalProjects;
   const visiblePublic = q ? publicProjects.filter((p) => !emptyGroup(p)) : publicProjects;
-  const visibleShared = sharedSessions.filter(matchSession);
+  // 协作任务：活跃在前、done 灰显（listTasks 已按 updated_at 倒序）。
+  const visibleTasks = tasks.filter((task) => !q || task.title.toLowerCase().includes(q));
+  const activeTasks = visibleTasks.filter((task) => task.status !== "done");
+  const doneTasks = visibleTasks.filter((task) => task.status === "done");
+  const taskSessionIds = new Set(tasks.map((task) => task.session_id));
+  const visibleShared = sharedSessions
+    .filter(matchSession)
+    .filter((s) => !taskSessionIds.has(s.session_id));
   const nothingVisible =
-    q !== "" && visiblePersonal.length === 0 && visiblePublic.length === 0 && def.length === 0 && visibleShared.length === 0;
+    q !== "" && visiblePersonal.length === 0 && visiblePublic.length === 0 && def.length === 0 && visibleShared.length === 0 && visibleTasks.length === 0;
 
   const menuSession = moveMenu
     ? sessions.find((s) => s.session_id === moveMenu.sessionId)
@@ -396,6 +461,32 @@ export function SessionList({
           onMoveMenu={(id, x, y) => setMoveMenu({ sessionId: id, x, y })}
         />
       ))}
+
+      {/* 协作任务（需求 → 研发 → 测试）：线程入口集中在此；共享分区不再重复展示。 */}
+      {(visibleTasks.length > 0 || !q) && (
+        <div style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", gap: 4, marginTop: 12 }}>
+          <span style={{ flex: 1 }}>🧭 {t("task.section")}</span>
+          <button
+            className="del"
+            title={t("task.newTitle")}
+            onClick={() => setNewTaskOpen(true)}
+          >
+            ＋{t("task.newTask")}
+          </button>
+        </div>
+      )}
+      {activeTasks.map((task) => (
+        <TaskRow key={task.task_id} task={task} />
+      ))}
+      {doneTasks.length > 0 && (
+        <div style={{ fontSize: 11, color: "var(--muted)", padding: "2px 8px" }}>
+          {t("task.doneHeader")}
+        </div>
+      )}
+      {doneTasks.map((task) => (
+        <TaskRow key={task.task_id} task={task} />
+      ))}
+      {newTaskOpen && <NewTaskDialog onClose={() => setNewTaskOpen(false)} />}
 
       {nothingVisible && (
         <div style={{ margin: "6px 8px", fontSize: 12, color: "var(--muted)" }}>
