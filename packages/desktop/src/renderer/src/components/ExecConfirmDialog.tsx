@@ -33,7 +33,9 @@ function describeParams(req: WsToolExecRequest): string {
 }
 
 export function ExecConfirmDialog(): React.JSX.Element | null {
-  const pending = useStore((s) => s.pendingExec);
+  // 并发执行请求队列：渲染队首，应答后自动轮到下一个。
+  const queue = useStore((s) => s.pendingExec);
+  const pending = queue[0];
   const trustMode = useStore((s) => s.trustMode);
   const respond = useStore((s) => s.respondExec);
   const [trustChecked, setTrustChecked] = useState(false);
@@ -44,9 +46,14 @@ export function ExecConfirmDialog(): React.JSX.Element | null {
   return (
     <div className="overlay">
       <div className="dialog">
-        <h2>{t("exec.title")}</h2>
+        <h2>
+          {t("exec.title")}
+          {queue.length > 1 ? t("perm.queued", { n: queue.length - 1 }) : ""}
+        </h2>
         <div style={{ color: "var(--muted)" }}>
-          {t("exec.desc", { action: t(ACTION_KEYS[pending.action]) })}
+          {pending.agent_name
+            ? t("exec.agentDesc", { agent: pending.agent_name, action: t(ACTION_KEYS[pending.action]) })
+            : t("exec.desc", { action: t(ACTION_KEYS[pending.action]) })}
         </div>
         <pre>{describeParams(pending)}</pre>
         {pending.action === "write_file" && typeof pending.params.content === "string" && (
@@ -66,11 +73,11 @@ export function ExecConfirmDialog(): React.JSX.Element | null {
           <div style={{ color: "var(--muted)", fontSize: 12 }}>{t("exec.trustOn")}</div>
         )}
         <div className="actions">
-          <button onClick={() => respond(false, false)}>{t("perm.deny")}</button>
+          <button onClick={() => respond(pending.request_id, false, false)}>{t("perm.deny")}</button>
           <button
             className="primary"
             onClick={() => {
-              respond(true, trustChecked);
+              respond(pending.request_id, true, trustChecked);
               setTrustChecked(false);
             }}
           >

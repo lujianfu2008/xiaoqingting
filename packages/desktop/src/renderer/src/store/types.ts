@@ -92,8 +92,10 @@ export interface BlmState {
   streaming: Record<string, string>;
   busy: Record<string, boolean>;
   usageBySession: Record<string, Usage>; // 最近一次回复的 token 用量（result 推送）
-  pendingPermission: WsPermissionRequest | null;
-  pendingExec: WsToolExecRequest | null;
+  // 并发审批队列（FIFO，弹窗渲染队首）：子代理/主线程可能同时发起多个
+  // 审批，单槽位会互相覆盖。result/error 到达时清空对应会话的队列。
+  pendingPermission: WsPermissionRequest[];
+  pendingExec: WsToolExecRequest[];
   trustMode: boolean;
   autoRead: boolean;
   voiceSettings: VoiceSettings;
@@ -214,8 +216,8 @@ export interface BlmState {
   /** 发送一条用户消息；false = 未发出（断线），草稿保留。 */
   send(text: string): boolean;
   interrupt(): void;
-  respondPermission(allow: boolean): void;
-  respondExec(allow: boolean, trustFromNow: boolean): void;
+  respondPermission(requestId: string, allow: boolean): void;
+  respondExec(requestId: string, allow: boolean, trustFromNow: boolean): void;
   setTrustMode(on: boolean): void;
   setAutoRead(on: boolean): void;
   setRecording(on: boolean): void;

@@ -87,31 +87,33 @@ export function createChatActions(
       sendJson({ type: "interrupt", session_id: currentSessionId });
     },
 
-    respondPermission(allow) {
+    respondPermission(requestId, allow) {
       const { pendingPermission } = get();
-      if (!pendingPermission) return;
+      const req = pendingPermission.find((r) => r.request_id === requestId);
+      if (!req) return;
       if (!socketOpen()) {
         // 断线时不关弹窗：提示后等重连，用户可再答。
         set({ error: t("err.offline") });
         return;
       }
-      sendJson({
-        type: "permission_response",
-        request_id: pendingPermission.request_id,
-        allow,
-      });
-      set({ pendingPermission: null });
+      // 先出队再发送：失败时服务端有超时兜底，本地不留僵尸弹窗。
+      set((s) => ({
+        pendingPermission: s.pendingPermission.filter((r) => r.request_id !== requestId),
+      }));
+      sendJson({ type: "permission_response", request_id: requestId, allow });
     },
 
-    respondExec(allow, trustFromNow) {
+    respondExec(requestId, allow, trustFromNow) {
       const { pendingExec } = get();
-      if (!pendingExec) return;
+      const req = pendingExec.find((r) => r.request_id === requestId);
+      if (!req) return;
       if (!socketOpen()) {
         set({ error: t("err.offline") });
         return;
       }
-      const req = pendingExec;
-      set({ pendingExec: null });
+      set((s) => ({
+        pendingExec: s.pendingExec.filter((r) => r.request_id !== requestId),
+      }));
       if (trustFromNow) {
         set({ trustMode: true });
         localStorage.setItem("blm.trustMode", "1");

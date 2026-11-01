@@ -25,10 +25,34 @@ function CopyButton({ text }: { text: string }): React.JSX.Element {
   );
 }
 
+// 子代理归属徽标：块由哪个子代理产生（主线程块无此字段，不渲染）。
+function AgentBadge({ block }: { block: { agent_name?: string } }): React.JSX.Element | null {
+if (!block.agent_name) return null;
+return (
+<span style={{ opacity: 0.85, marginRight: 4 }} title={block.agent_name}>
+🤖 {block.agent_name}
+</span>
+);
+}
+
+// 委派调用的任务摘要：description 优先，没有用 prompt 截断。
+function delegateSummary(block: Extract<Block, { kind: "tool_call" }>): string {
+if (block.tool_name !== "delegate_task") return "";
+const inp = typeof block.input === "object" && block.input !== null
+? (block.input as { description?: unknown; prompt?: unknown })
+: {};
+const s = [inp.description, inp.prompt].find(
+(v): v is string => typeof v === "string" && v.trim().length > 0,
+);
+if (!s) return "";
+return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+}
+
 function ToolResult({ block }: { block: Extract<Block, { kind: "tool_result" }> }): React.JSX.Element {
   return (
     <div style={{ position: "relative" }}>
       <div className={`tool-block ${block.is_error ? "error" : ""}`}>
+        <AgentBadge block={block} />
         {block.is_error ? "⚠ " : "✓ "}
         {block.content.slice(0, 300)}
         {block.content.length > 300 ? "…" : ""}
@@ -49,8 +73,16 @@ return (
 <CopyButton text={block.text} />
 </div>
 );
-case "tool_call":
-return <div className="tool-block">🔧 {block.tool_name}</div>;
+case "tool_call": {
+const summary = delegateSummary(block);
+return (
+<div className="tool-block">
+<AgentBadge block={block} />
+🔧 {block.tool_name}
+{summary ? <span style={{ opacity: 0.75 }}> — {summary}</span> : null}
+</div>
+);
+}
 case "tool_result":
 return <ToolResult block={block} />;
 }

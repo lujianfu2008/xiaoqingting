@@ -42,7 +42,8 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       break;
 
     case "permission_request":
-      set({ pendingPermission: msg });
+      // 并发审批：追加进队列（弹窗渲染队首，逐个应答）。
+      set((s) => ({ pendingPermission: [...s.pendingPermission, msg] }));
       break;
 
     case "tool_exec_request": {
@@ -58,7 +59,7 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
         },
         get().trustMode,
       );
-      if (!handled) set({ pendingExec: msg });
+      if (!handled) set((s) => ({ pendingExec: [...s.pendingExec, msg] }));
       break;
     }
 
@@ -66,6 +67,9 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       set((s) => ({
         busy: { ...s.busy, [msg.session_id]: false },
         streaming: { ...s.streaming, [msg.session_id]: "" },
+        // 回合结束，该会话还挂着的审批/执行请求已过时：清掉，弹窗不残留。
+        pendingPermission: s.pendingPermission.filter((r) => r.session_id !== msg.session_id),
+        pendingExec: s.pendingExec.filter((r) => r.session_id !== msg.session_id),
         // 本回复用量 + 会话累计（服务端落库；本地同步累加避免整表刷新）。
         usageBySession: msg.usage
           ? { ...s.usageBySession, [msg.session_id]: msg.usage }
@@ -111,6 +115,13 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       set((s) => ({
         error: msg.message,
         busy: msg.session_id ? { ...s.busy, [msg.session_id]: false } : s.busy,
+        // 出错会话的待审批/待执行请求一并清掉（弹窗不残留）。
+        pendingPermission: msg.session_id
+          ? s.pendingPermission.filter((r) => r.session_id !== msg.session_id)
+          : s.pendingPermission,
+        pendingExec: msg.session_id
+          ? s.pendingExec.filter((r) => r.session_id !== msg.session_id)
+          : s.pendingExec,
       }));
       // 表情只跟随当前会话（或全局性错误）；后台会话报错只弹提示不变脸。
       if (!msg.session_id || msg.session_id === get().currentSessionId) {
