@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
 import { LS } from "../store/persist";
@@ -56,6 +56,20 @@ currentSessionId ? s.usageBySession[currentSessionId] : undefined,
 const totalUsage = useStore(
 (s) => s.sessions.find((x) => x.session_id === s.currentSessionId)?.usage,
 );
+// 未闭合的主线程委派调用数 = 后台子代理仍在跑。委派 tool_result 闭合该调用，
+// 但后台占位结果（任务仍在跑）不算闭合——按内容识别跳过。
+const subagentsRunning = useMemo(() => {
+const open = new Set<string>();
+for (const b of blocks) {
+if (b.kind === "tool_call" && b.tool_name === "delegate_task" && !b.parent_tool_call_id) {
+open.add(b.id);
+} else if (b.kind === "tool_result" && open.has(b.id)) {
+if (/running in the background|后台运行|后台任务/.test(b.content.slice(0, 200))) continue;
+open.delete(b.id);
+}
+}
+return open.size;
+}, [blocks]);
 const error = useStore((s) => s.error);
 const wsStatus = useStore((s) => s.wsStatus);
 const voiceSettings = useStore((s) => s.voiceSettings);
@@ -257,6 +271,14 @@ onReset={() => setInputH(INPUT_H_DEFAULT)}
 {busyHint && (
 <div className="tool-block" style={{ color: "#e5a83a" }}>
 ⏳ {t("chat.busyHint")}
+</div>
+)}
+{/* 后台子代理仍在跑（主回复的 result 可能已到、busy 已复位）：显式提示，
+    否则时间线里陆续出现的子代理块像「凭空冒出来的消息」。零协议方案：从
+    未闭合的主线程委派调用推导（后台占位结果不闭合）。 */}
+{subagentsRunning > 0 && (
+<div className="tool-block" style={{ color: "var(--muted)" }}>
+🤖 {t("chat.subagentsRunning", { n: subagentsRunning })}
 </div>
 )}
 {attachHint && (

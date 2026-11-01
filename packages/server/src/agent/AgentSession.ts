@@ -186,7 +186,7 @@ export class AgentSession {
           send: (msg) => this.events.send(msg),
           emitBlocks: (blocks) => this.emitBlocks(blocks),
           onEngineSessionId: (engineSessionId) => this.persistEngineSessionId(engineSessionId),
-          onUsage: (usage) => this.recordUsage(usage),
+          onUsage: (usage, cumulative) => this.recordUsage(usage, cumulative),
           onTurnEnd: () => {
             // 回合结束：队列里还有背靠背排队的消息时引擎马上继续跑，保持 busy；
             // 否则标记空闲——disposeIdleSessions（更换 LLM/MCP 配置后调用）
@@ -237,8 +237,15 @@ export class AgentSession {
     this.store.saveSession(this.record);
   }
 
-  /** 累计本会话 token 用量（每条回复一次，随 record 落库并出现在会话 meta）。 */
-  private recordUsage(usage: Usage): void {
+  /** 记录本会话 token 用量（每条回复一次，随 record 落库并出现在会话 meta）。
+   *  cumulative=true：modelUsage 口径，本身就是会话累计值——替换而非累加；
+   *  否则（老 CLI 的逐回合 usage）按原逻辑累加。 */
+  private recordUsage(usage: Usage, cumulative?: boolean): void {
+    if (cumulative) {
+      this.record.usage = usage;
+      this.store.saveSession(this.record);
+      return;
+    }
     const prev = this.record.usage;
     this.record.usage = {
       input_tokens: (prev?.input_tokens ?? 0) + usage.input_tokens,

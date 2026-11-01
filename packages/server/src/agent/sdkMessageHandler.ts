@@ -15,8 +15,9 @@ export interface MessageSink {
   emitBlocks(blocks: Block[]): void;
   /** Persist the engine's session id so the conversation can be resumed. */
   onEngineSessionId(engineSessionId: string): void;
-  /** One turn's token usage (accumulated by the caller into the session record). */
-  onUsage(usage: Usage): void;
+  /** One turn's token usage. cumulative=false（老 CLI 回退口径）时逐回合累加，
+   *  true（modelUsage 口径）时直接替换——modelUsage 本身就是跨回合累计值。 */
+  onUsage(usage: Usage, cumulative?: boolean): void;
   /** A turn just finished (result delivered) — the caller uses this to arm the
    *  idle reaper while the engine loop stays alive between turns. */
   onTurnEnd?(): void;
@@ -157,13 +158,36 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
 
     case "result": {
       // final text is already delivered via assistant messages
-      // 用量：token 数恒下发；费用仅在 REVEAL_USAGE 开启时给出数值。
+      // 用量：优先 modelUsage 口径（含子代理/sidechain/内部调用，且为跨回合
+      // 累计值——sink 侧按「替换」处理）；无该字段的老 CLI 回退 usage（仅主
+      // 循环、逐回合，sink 侧按「累加」处理）。token 数恒下发；费用仅在
+      // REVEAL_USAGE 开启时给出数值。
       const raw = message as {
         usage?: { input_tokens?: unknown; output_tokens?: unknown };
+        modelUsage?: Record<
+          string,
+          { inputTokens?: unknown; outputTokens?: unknown; costUSD?: unknown }
+        >;
         total_cost_usd?: unknown;
       };
       let usage: Usage | undefined;
-      if (
+      let cumulative = false;
+      if (raw.modelUsage && Object.keys(raw.modelUsage).length > 0) {
+        let input = 0;
+        let output = 0;
+        let cost = 0;
+        for (const m of Object.values(raw.modelUsage)) {
+          if (typeof m.inputTokens === "number") input += m.inputTokens;
+          if (typeof m.outputTokens === "number") output += m.outputTokens;
+          if (typeof m.costUSD === "number") cost += m.costUSD;
+        }
+        usage = {
+          input_tokens: input,
+          output_tokens: output,
+          cost_usd: config.revealUsage ? cost : null,
+        };
+        cumulative = true;
+      } else if (
         raw.usage &&
         typeof raw.usage.input_tokens === "number" &&
         typeof raw.usage.output_tokens === "number"
@@ -177,7 +201,7 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
               : null,
         };
       }
-      if (usage) sink.onUsage(usage);
+      if (usage) sink.onUsage(usage, cumulative);
       sink.send({
         type: "result",
         session_id: sid,
