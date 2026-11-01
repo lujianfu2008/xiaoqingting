@@ -160,6 +160,31 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       });
       break;
 
+    case "task_update": {
+      // 协作流任务 upsert。只有内容有变化（或首见且我有角色）才轻提示：
+      // 重连补推/REST 播种的内容与本地一致，不弹。
+      const me = get().username;
+      const prev = get().tasks.find((x) => x.task_id === msg.task.task_id);
+      const changed =
+        !prev || JSON.stringify(prev) !== JSON.stringify(msg.task);
+      set((s) => {
+        const exists = s.tasks.some((x) => x.task_id === msg.task.task_id);
+        return {
+          tasks: exists
+            ? s.tasks.map((x) => (x.task_id === msg.task.task_id ? msg.task : x))
+            : [msg.task, ...s.tasks],
+        };
+      });
+      if (!changed || !me) break;
+      const involved =
+        msg.task.requester === me || msg.task.dev === me || msg.task.tester === me;
+      if (!involved) break;
+      // 按优先级给出「需要我动作」的提示。
+      const toast = toastForTask(msg.task, me);
+      if (toast) set({ error: toast });
+      break;
+    }
+
     case "session_created":
       if (msg.session.shared && msg.session.owner !== get().username) {
         // Someone's shared session got (re)named — refresh the shared list.
@@ -194,6 +219,25 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
     case "pong":
       break;
   }
+}
+
+/** 任务变化时按我的角色挑一条「需要我动作」的轻提示（无则 null）。 */
+function toastForTask(
+  task: BlmState["tasks"][number],
+  me: string,
+): string | null {
+  const title = task.title;
+  if (task.status === "done") return t("task.doneToast", { title });
+  if (task.status === "fixing" && task.dev === me) {
+    return t("task.issueToast", { title });
+  }
+  if (task.status === "testing" && task.tester === me) {
+    return t("task.testerToast", { title });
+  }
+  if (task.status === "developing" && task.dev === me) {
+    return t("task.devToast", { title });
+  }
+  return null;
 }
 
 export type { BlmState };

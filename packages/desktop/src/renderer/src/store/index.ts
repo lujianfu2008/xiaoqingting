@@ -6,6 +6,7 @@ import { apiBase } from "./http";
 import { createAuthActions } from "./actions/auth";
 import { createConnectionActions } from "./actions/connection";
 import { createSessionActions } from "./actions/sessions";
+import { createTaskActions } from "./actions/tasks";
 import { createProjectActions } from "./actions/projects";
 import { createAdminActions } from "./actions/admin";
 import { createLlmActions } from "./actions/llm";
@@ -37,6 +38,7 @@ export const useStore = create<BlmState>((set, get) => ({
   sharedSessions: [],
   projects: [],
   updateRequests: [],
+  tasks: [],
   auditLog: [],
   pendingReviewCount: 0,
   presence: {},
@@ -74,6 +76,7 @@ export const useStore = create<BlmState>((set, get) => ({
   ...createAuthActions(set, get),
   ...createConnectionActions(set, get),
   ...createSessionActions(set, get),
+  ...createTaskActions(set, get),
   ...createProjectActions(set, get),
   ...createAdminActions(set, get),
   ...createLlmActions(set, get),

@@ -3,6 +3,8 @@ import type {
   AgentInfo,
   AuditEntry,
   Block,
+  CreateTaskRequest,
+  FlowAction,
   ImportMcpResult,
   ImportSkillsResult,
   LlmConfigInfo,
@@ -16,6 +18,7 @@ import type {
   ProjectMeta,
   SkillInfo,
   SessionMeta,
+  TaskView,
   UpdateRequestView,
   Usage,
   UserSummary,
@@ -81,6 +84,7 @@ export interface BlmState {
   sharedSessions: SessionMeta[]; // read-only sessions shared by other users
   projects: ProjectMeta[]; // my project spaces + public projects, in creation order
   updateRequests: UpdateRequestView[]; // 公有域更新申请（管理员=全部，普通用户=自己的）
+  tasks: TaskView[]; // 协作流任务线程（我是需求方/研发/测试的）；客户端按 session_id 反查
   auditLog: AuditEntry[]; // 管理动作审计（最近在前，仅管理页拉取）
   pendingReviewCount: number; // 待审核注册数（WS 实时推送 + 上线补推，审核员/管理员可见）
   presence: Record<string, boolean>; // username -> online, seeded via REST + WS deltas
@@ -148,6 +152,12 @@ export interface BlmState {
   loadUpdateRequests(): Promise<void>;
   /** 批准/拒绝一条公有域更新申请（仅管理员）。 */
   decideUpdateRequest(id: string, approve: boolean, reason?: string): Promise<boolean>;
+  // 协作流任务（需求 → 研发 → 测试）。
+  loadTasks(): Promise<void>;
+  /** 创建任务线程（同时建绑定会话）；null = 失败。 */
+  createTask(input: CreateTaskRequest): Promise<TaskView | null>;
+  /** 推进流转；false = 服务端拒绝（错误已提示）。 */
+  flowTask(taskId: string, action: FlowAction, target?: string, note?: string): Promise<boolean>;
   listAdminUsers(): Promise<AdminUserDetail[]>;
   setUserRole(username: string, role: "admin" | "reviewer" | "user"): Promise<boolean>;
   setUserDisabled(username: string, disabled: boolean): Promise<boolean>;
