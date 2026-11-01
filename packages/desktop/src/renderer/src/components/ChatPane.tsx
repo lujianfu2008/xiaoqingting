@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
+import { executorOfTask } from "../store/types";
 import { LS } from "../store/persist";
 import { ChatMessages } from "./chat/ChatMessages";
 import { FlowBar } from "./chat/FlowBar";
@@ -42,11 +43,15 @@ const sharedOwner = useStore(
 (s) => s.sharedSessions.find((x) => x.session_id === s.currentSessionId)?.owner ?? null,
 );
 // Own sessions are always "online"; shared ones follow the owner's presence.
+// 协作流任务线程跟随当前负责人（工作台跟随指派）。
 const ownerOnline = useStore((s) => {
 if (!s.sharedView || !s.currentSessionId) return true;
-const owner = s.sharedSessions.find((x) => x.session_id === s.currentSessionId)?.owner;
-if (!owner) return true;
-return s.presence[owner] ?? false;
+const flowTask = s.tasks.find((x) => x.session_id === s.currentSessionId);
+const target = flowTask
+? executorOfTask(flowTask)
+: s.sharedSessions.find((x) => x.session_id === s.currentSessionId)?.owner;
+if (!target) return true;
+return s.presence[target] ?? false;
 });
 const blocks = useStore(
 (s) => (currentSessionId ? s.blocksBySession[currentSessionId] : null) ?? EMPTY_BLOCKS,
@@ -294,10 +299,15 @@ onReset={() => setInputH(INPUT_H_DEFAULT)}
 )}
 {sharedView && (
 <div className="tool-block" style={{ color: "var(--muted)" }}>
-🌐 {t("chat.sharedBanner", {
+{task
+? `🧭 ${t("chat.taskBanner", {
+executor: executorOfTask(task),
+online: ownerOnline ? t("chat.executorOnline") : t("chat.executorOffline"),
+})}`
+: `🌐 ${t("chat.sharedBanner", {
 owner: sharedOwner ?? "",
 online: ownerOnline ? t("chat.ownerOnline") : t("chat.ownerOffline"),
-})}
+})}`}
 </div>
 )}
 {attachments.length > 0 && (
@@ -324,7 +334,9 @@ disabled={sharedView && !ownerOnline}
 style={{ height: "100%", maxHeight: "none" }}
 placeholder={
 sharedView && !ownerOnline
-? t("chat.phOwnerOffline")
+? task
+? t("chat.phExecutorOffline")
+: t("chat.phOwnerOffline")
 : recording
 ? t("chat.phRecording")
 : currentSessionId

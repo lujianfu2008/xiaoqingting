@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { TaskView } from "@blm/protocol";
 import { useStore } from "../../store";
 import { useT } from "../../i18n";
+import { executorOfTask } from "../../store/types";
 import { FLOW_STATUS_LABEL } from "./MessageBlock";
 import { UserPickerDialog } from "../UserPickerDialog";
 
@@ -72,7 +73,8 @@ export function FlowBar({ task }: { task: TaskView }): React.JSX.Element {
   const t = useT();
   const me = useStore((s) => s.username);
   const flowTask = useStore((s) => s.flowTask);
-  const requesterOnline = useStore((s) => s.presence[task.requester] ?? false);
+  const executor = executorOfTask(task);
+  const executorOnline = useStore((s) => s.presence[executor] ?? false);
   const [pickMode, setPickMode] = useState<PickMode | null>(null);
   const [descOpen, setDescOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
@@ -201,10 +203,11 @@ export function FlowBar({ task }: { task: TaskView }): React.JSX.Element {
         </div>
       )}
 
-      {/* 需求方离线：会话里他人无法发言（既有冻结行为），流程条明示。 */}
-      {!requesterOnline && s !== "done" && (
+      {/* 当前负责人离线：执行面（本机执行/审批/发言推进）跟随负责人，
+          他离线时线程无法推进——需求方本人仍可旁观与发言。 */}
+      {!executorOnline && s !== "done" && (
         <div style={{ fontSize: 11, color: "#e5a83a" }}>
-          ⚠ {t("task.requesterOffline")}
+          ⚠ {t("task.executorOffline")}
         </div>
       )}
 

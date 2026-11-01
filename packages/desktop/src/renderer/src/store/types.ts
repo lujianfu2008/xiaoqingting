@@ -261,3 +261,20 @@ export const TRUSTABLE_ACTIONS = new Set([
   "browser_snapshot",
   "browser_close",
 ]);
+
+/**
+ * 协作流任务的当前负责人（工作台跟随指派）：agent 的本机执行、审批应答、
+ * 发言守卫都跟随此用户。与服务端 TaskManager.executorOf 同一规则；无任务
+ * 的会话调用方回退会话主人。
+ */
+export function executorOfTask(task: TaskView): string {
+  switch (task.status) {
+    case "developing":
+    case "fixing":
+      return task.dev ?? task.requester;
+    case "testing":
+      return task.tester ?? task.dev ?? task.requester;
+    default: // analyzing / done
+      return task.requester;
+  }
+}

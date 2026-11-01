@@ -1,5 +1,5 @@
 import type { BlmState, GetState, SetState } from "../types";
-import { TRUSTABLE_ACTIONS } from "../types";
+import { TRUSTABLE_ACTIONS, executorOfTask } from "../types";
 import { sendExecResult, sendJson, socketOpen, armSendAck } from "../socket";
 import { stopAudio } from "../../speech";
 import { t } from "../../i18n";
@@ -51,10 +51,15 @@ export function createChatActions(
         set({ error: t("err.offline") });
         return false;
       }
-      // Collaborators need the owner online to approve local actions — fail fast
-      // here instead of letting the engine stall (the server enforces this too).
-      if (sharedView && !get().ownerOnlineOf(currentSessionId)) {
-        set({ error: t("err.ownerOffline") });
+      // 协作线程跟随当前负责人（工作台跟随指派），普通共享会话仍是 owner：
+      // 负责人不在线时快速失败，而不是让引擎卡在本机执行超时上（服务端同样执法）。
+      const flowTask = get().tasks.find((tk) => tk.session_id === currentSessionId);
+      const executor = flowTask ? executorOfTask(flowTask) : null;
+      const targetOnline = executor
+        ? (get().presence[executor] ?? false)
+        : get().ownerOnlineOf(currentSessionId);
+      if (sharedView && !targetOnline) {
+        set({ error: t(executor ? "err.executorOffline" : "err.ownerOffline") });
         return false;
       }
       stopAudio();
