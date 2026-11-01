@@ -5,6 +5,7 @@ import { registerAuthRoutes } from "./authRoutes.js";
 import { registerSessionRoutes } from "./sessionRoutes.js";
 import { registerAdminRoutes } from "./adminRoutes.js";
 import { registerUpdateRequestRoutes } from "./updateRequestRoutes.js";
+import { registerTaskRoutes } from "./taskRoutes.js";
 import { registerLlmRoutes } from "./llmRoutes.js";
 import { registerAsrRoutes } from "./asrRoutes.js";
 import { registerMcpRoutes } from "./mcpRoutes.js";
@@ -24,6 +25,7 @@ export function registerRoutes(
   registerSessionRoutes(app, manager);
   registerAdminRoutes(app, manager);
   registerUpdateRequestRoutes(app, manager);
+  registerTaskRoutes(app, manager);
   registerLlmRoutes(app, manager);
   registerAsrRoutes(app);
   registerMcpRoutes(app, manager);

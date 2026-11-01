@@ -74,6 +74,11 @@ export function handleConnection(
     send({ type: "review_request", pending: countPendingUsers() });
   }
 
+  // 协作流任务补推：未完结任务（与 REST 播种双保险，upsert 幂等）。
+  for (const task of manager.activeTasksFor(payload.uid)) {
+    send({ type: "task_update", task });
+  }
+
   socket.on("message", (raw: unknown) => {
     let parsed: unknown;
     try {
