@@ -91,6 +91,14 @@ npm run build       # build all packages
 
 More design notes in [CLAUDE.md](CLAUDE.md).
 
+## License
+
+MIT © 2026 [lujianfu2008](https://github.com/lujianfu2008)
+
+> **Fully open source**: client, server and protocol layers are all published in this repository under the MIT license — free to use, modify, commercialize and redistribute.
+>
+> The only things left out are large model weights (`.onnx`) and local secret config (`.env`), see "What Never Gets Committed" above.
+
 ## Notes
 
 - Shared session types live in `@blm/protocol`, validated with Zod
