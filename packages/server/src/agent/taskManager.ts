@@ -83,6 +83,7 @@ export class TaskManager {
    * | report_issue  | testing 且tester已设| 恰为 tester      | —         | 必填   | fixing    |
    * | resubmit      | fixing             | dev              | —         | 可选   | testing   |
    * | pass          | testing 且tester已设| 恰为 tester      | —         | 可选   | done      |
+   * | cancel        | 非 done            | requester        | —         | 可选   | done      |
    * fixing 唯一出口是 resubmit，循环无限制。
    */
   flow(actor: string, taskId: string, input: TaskFlowInput): FlowResult {
@@ -182,6 +183,17 @@ export class TaskManager {
         if (from !== "testing") return badStatus("testing");
         if (!rec.tester) return noTester();
         if (!isTester) return forbidden();
+        next = "done";
+        break;
+      }
+      case "cancel": {
+        // 需求方放弃任务：任意未完结状态可取消（否则卡在 analyzing/developing
+        // 的线程既推不动也删不掉）。落到 done 与「通过」同构——任务记录保留、
+        // 时间线记录取消事件，协作端工作台随 task_update 摘除。
+        if (from === "done") {
+          return { ok: false, code: "bad_status", message: "任务已完结，无需取消。" };
+        }
+        if (!isRequester) return forbidden();
         next = "done";
         break;
       }

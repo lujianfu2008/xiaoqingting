@@ -164,6 +164,15 @@ export function FlowBar({ task }: { task: TaskView }): React.JSX.Element {
             {t("task.resubmit")}
           </button>
         )}
+        {/* 需求方放弃任务：任意未完结状态可取消（与删除任务线程同款守卫）。 */}
+        {isRequester && s !== "done" && (
+          <button
+            disabled={busy}
+            onClick={() => void run(() => flowTask(task.task_id, "cancel"))}
+          >
+            {t("task.cancel")}
+          </button>
+        )}
       </div>
 
       {/* 反馈问题：行内输入（Electron 无 window.prompt）。 */}

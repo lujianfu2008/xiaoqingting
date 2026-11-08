@@ -70,6 +70,8 @@ export interface BlmState {
   role: "admin" | "reviewer" | "user"; // 公有域角色（服务端确认；bootstrap admin 恒为 admin）
   wsStatus: WsStatus;
   error: string | null;
+  // 任务/协作流轻提示：数秒后自动消失的信息条（区别于需人工处理的 error）。
+  notice: string | null;
   // Set when startup auto-login was blocked: the account is already signed in
   // in another instance on this machine. Holds the blocked 工号 for the notice.
   localLock: string | null;

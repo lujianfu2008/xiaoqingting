@@ -56,8 +56,10 @@ export function userExists(username: string): boolean {
   return loadUsers().some((u) => u.username === username);
 }
 
-export function verifyCredentials(username: string, password: string): boolean {
-  if (username === config.username && password === config.password) return true;
+export function verifyCredentials(identifier: string, password: string): boolean {
+  if (identifier === config.username && password === config.password) return true;
+  const username = resolveUsername(identifier);
+  if (!username) return false;
   const u = loadUsers().find((x) => x.username === username);
   if (!u) return false;
   const a = Buffer.from(hash(u.salt, password));
@@ -65,16 +67,34 @@ export function verifyCredentials(username: string, password: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-/** Create a user. Returns false if the username or employee id is taken. */
+/** Login identifier (用户名或工号) → canonical username. Null if unknown.
+ *  用户名与工号是两个互不相交的命名空间（addUser/employeeIdTaken 保证），
+ *  任意标识符至多命中一人，无需处理歧义。 */
+export function resolveUsername(identifier: string): string | null {
+  if (identifier === config.username) return identifier;
+  if (config.employeeId && identifier === config.employeeId) return config.username;
+  const users = loadUsers();
+  const u = users.find((x) => x.username === identifier);
+  if (u) return u.username;
+  return users.find((x) => (x.employee_id ?? x.username) === identifier)?.username ?? null;
+}
+
+/** Whether the string collides with any existing 用户名 or 工号 (bootstrap included). */
+export function identifierTaken(identifier: string): boolean {
+  return userExists(identifier) || employeeIdTaken(identifier);
+}
+
+/** Create a user. Returns false if the username or employee id collides with
+ *  any existing username or employee id (the two namespaces must stay disjoint). */
 export function addUser(
   username: string,
   password: string,
   employeeId?: string,
   status: UserStatus = "approved",
 ): boolean {
-  if (userExists(username)) return false;
+  if (identifierTaken(username)) return false;
   const emp = (employeeId?.trim() || username).slice(0, 32);
-  if (employeeIdTaken(emp)) return false;
+  if (identifierTaken(emp)) return false;
   const users = loadUsers();
   const salt = crypto.randomBytes(16).toString("hex");
   users.push({
@@ -89,11 +109,13 @@ export function addUser(
   return true;
 }
 
-/** Whether a 工号 is already used (bootstrap admin included). */
+/** Whether a 工号 is already used (bootstrap admin included). Also rejects
+ *  collisions with any 用户名 — the two namespaces must stay disjoint so that
+ *  login can accept either identifier unambiguously. */
 export function employeeIdTaken(employeeId: string): boolean {
   const emp = employeeId.trim();
   if (emp === config.employeeId || emp === config.username) return true;
-  return loadUsers().some((u) => (u.employee_id ?? u.username) === emp);
+  return loadUsers().some((u) => (u.employee_id ?? u.username) === emp || u.username === emp);
 }
 
 /** 工号 for display. Bootstrap admin uses BLMA_EMPLOYEE_ID (default: username). */

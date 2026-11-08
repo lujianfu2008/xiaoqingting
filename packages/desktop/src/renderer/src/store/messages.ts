@@ -1,7 +1,7 @@
 import type { ServerMessage } from "@blm/protocol";
 import { normalizeExpr } from "../components/DragonflyLogo";
 import { autoExecIfTrusted } from "./actions/chat";
-import { clearSendAck } from "./socket";
+import { clearSendAck, clearSendAckByText, pendingAcksForSession } from "./socket";
 import { t } from "../i18n";
 import type { BlmState, GetState, SetState } from "./types";
 
@@ -18,8 +18,12 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       break;
 
     case "message_block":
-      // 自己发出的 user_text 回到界面上 = 服务端已收到，解除发送确认。
-      if (msg.block.kind === "user_text") clearSendAck(msg.session_id);
+      // 自己发出的 user_text 回到界面上 = 服务端已收到，解除该条的发送确认。
+      // 按 client_msg_id 精确解除；老服务端不回显 id 时按文本兜底匹配。
+      if (msg.block.kind === "user_text") {
+        if (msg.block.client_msg_id) clearSendAck(msg.block.client_msg_id);
+        else clearSendAckByText(msg.session_id, msg.block.text);
+      }
       set((s) => ({
         blocksBySession: {
           ...s.blocksBySession,
@@ -64,8 +68,15 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
     }
 
     case "result":
+      // 引擎命令队列里还有用户消息（回合中补充的内容没被本回合并入）时还会
+      // 继续出结果：保持 busy，输入框不切回「发送」（否则用户以为已空闲）。
+      // 本机还有消息在等送达确认时同理（服务端还没接手，不能解锁）。
       set((s) => ({
-        busy: { ...s.busy, [msg.session_id]: false },
+        busy: {
+          ...s.busy,
+          [msg.session_id]:
+            (msg.queued_turn_count ?? 0) > 0 || pendingAcksForSession(msg.session_id) > 0,
+        },
         streaming: { ...s.streaming, [msg.session_id]: "" },
         // 回合结束，该会话还挂着的审批/执行请求已过时：清掉，弹窗不残留。
         pendingPermission: s.pendingPermission.filter((r) => r.session_id !== msg.session_id),
@@ -179,9 +190,10 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       const involved =
         msg.task.requester === me || msg.task.dev === me || msg.task.tester === me;
       if (!involved) break;
-      // 按优先级给出「需要我动作」的提示。
+      // 按优先级给出「需要我动作」的提示。走 notice（数秒自动消失）而非
+      // error——error 是常驻横幅，任务提示挂在里面会永远粘在所有会话顶部。
       const toast = toastForTask(msg.task, me);
-      if (toast) set({ error: toast });
+      if (toast) showNotice(set, toast);
       break;
     }
 
@@ -219,6 +231,17 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
     case "pong":
       break;
   }
+}
+
+/** 任务轻提示的自动消失定时器（单槽位：新提示顶掉旧提示与其计时器）。 */
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+function showNotice(set: SetState, text: string): void {
+  if (noticeTimer) clearTimeout(noticeTimer);
+  set({ notice: text });
+  noticeTimer = setTimeout(() => {
+    noticeTimer = null;
+    set({ notice: null });
+  }, 6000);
 }
 
 /** 任务变化时按我的角色挑一条「需要我动作」的轻提示（无则 null）。 */

@@ -25,7 +25,35 @@ export const LS = {
   sidebarAvatarCollapsed: "blm.sidebarAvatarCollapsed",
   // Same toggle as above, now owned by the store as「默认显示形象」("1"/"0").
   avatarVisible: "blm.avatarVisible",
+  // 登录过的用户名（JSON 数组，最近优先；只记名字绝不记密码）。
+  loginHistory: "blm.loginHistory",
 } as const;
+
+/** 登录历史（登录屏快捷选择）。坏数据一律当空。 */
+export function loadLoginHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(LS.loginHistory);
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLoginHistory(names: string[]): void {
+  localStorage.setItem(LS.loginHistory, JSON.stringify(names.slice(0, 5)));
+}
+
+/** 登录成功后记名字：最近优先、去重、最多 5 个。 */
+export function rememberLoginName(name: string): void {
+  if (!name) return;
+  saveLoginHistory([name, ...loadLoginHistory().filter((x) => x !== name)]);
+}
+
+/** 从登录历史移除（登录屏 ✕）。 */
+export function forgetLoginName(name: string): void {
+  saveLoginHistory(loadLoginHistory().filter((x) => x !== name));
+}
 
 /** 形象默认显隐。旧版只写 collapsed 键，首次读取时迁移过来。 */
 export function loadAvatarVisible(): boolean {

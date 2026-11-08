@@ -1,6 +1,6 @@
 import type { BlmState, GetState, SetState } from "../types";
 import { TRUSTABLE_ACTIONS, executorOfTask } from "../types";
-import { sendExecResult, sendJson, socketOpen, armSendAck } from "../socket";
+import { sendExecResult, sendJson, socketOpen, armSendAck, pendingAcksForSession } from "../socket";
 import { stopAudio } from "../../speech";
 import { t } from "../../i18n";
 
@@ -64,17 +64,33 @@ export function createChatActions(
       }
       stopAudio();
       set({ speaking: false });
-      sendJson({ type: "user_message", session_id: currentSessionId, text });
+      // 每条消息自带送达确认 id：回合进行中连发补充消息时，多个 ack 各自独立
+      // 结算，服务端回显该 id 的 user_text 块即确认。
+      const clientMsgId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      sendJson({
+        type: "user_message",
+        session_id: currentSessionId,
+        text,
+        client_msg_id: clientMsgId,
+      });
       // No local echo here — the server broadcasts the user_text block to every
       // connection of shared sessions (owner included), avoiding duplicates.
       set((s) => ({
         busy: { ...s.busy, [currentSessionId]: true },
       }));
       // 服务端回显 user_text 块即送达确认；超时/断线则提示并把文本放回输入框。
-      armSendAck(currentSessionId, () => {
+      // 超时只复位「没有其它在途发送」的 busy：补充消息连发时，别的消息确认
+      // 到了就说明链路正常、回复会接上。
+      armSendAck(clientMsgId, currentSessionId, text, () => {
         set((s) => ({
           error: t("err.sendTimeout"),
-          busy: { ...s.busy, [currentSessionId]: false },
+          busy:
+            pendingAcksForSession(currentSessionId) > 0
+              ? s.busy
+              : { ...s.busy, [currentSessionId]: false },
           draft: s.draft ? `${text}\n${s.draft}` : text,
         }));
       });

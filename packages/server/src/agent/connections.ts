@@ -83,10 +83,10 @@ export class ConnectionRegistry {
   /**
    * Broadcast to the owner, plus every other connected user while the session
    * is shared. Local execution (tool_exec_request) goes to the session's
-   * current executor (工作台跟随指派) — it runs on that user's machine, falling
-   * back to the owner for non-task sessions. Permission requests additionally
-   * reach the online executor and online approvers (approvers 字段，须同时是
-   * 共享可见用户)：谁先应答谁生效。
+   * current executor (工作台跟随指派)，无任务的共享会话跟随最近发言人（谁驱动
+   * 会话就在谁机器上执行，避免窗口弹到没在看会话的主人桌上），最终回退主人。
+   * Permission requests additionally reach the online executor and online
+   * approvers (approvers 字段，须同时是共享可见用户)：谁先应答谁生效。
    */
   broadcastShared(ownerId: string, sessionId: string, msg: ServerMessage): void {
     if (msg.type === "tool_exec_request") {

@@ -6,7 +6,7 @@ import { z } from "zod";
 export const TaskStatus = z.enum(["analyzing", "developing", "fixing", "testing", "done"]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
-// 流转动作：指派研发 / 提测 / 改派测试 / 报问题 / 重新提测 / 通过。
+// 流转动作：指派研发 / 提测 / 改派测试 / 报问题 / 重新提测 / 通过 / 取消。
 export const FlowAction = z.enum([
   "assign_dev",
   "submit_test",
@@ -14,6 +14,7 @@ export const FlowAction = z.enum([
   "report_issue",
   "resubmit",
   "pass",
+  "cancel",
 ]);
 export type FlowAction = z.infer<typeof FlowAction>;
 

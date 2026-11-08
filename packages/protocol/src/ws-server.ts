@@ -62,6 +62,10 @@ export const WsResult = z.object({
   // Per-turn token usage; cost_usd is null unless the server has
   // REVEAL_USAGE=true. Tokens are always reported.
   usage: Usage.optional(),
+  // 引擎命令队列里还剩几条用户消息（含回合中被并入的补充消息）。>0 表示
+  // 不用再输入就会继续有回复；客户端据此保持 busy，而不是看到第一个 result
+  // 就把输入解锁（否则补充消息的回复还在路上，界面已显示空闲）。
+  queued_turn_count: z.number().optional(),
 });
 
 export const WsError = z.object({

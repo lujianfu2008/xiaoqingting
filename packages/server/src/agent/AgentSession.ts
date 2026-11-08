@@ -187,16 +187,32 @@ export class AgentSession {
           emitBlocks: (blocks) => this.emitBlocks(blocks),
           onEngineSessionId: (engineSessionId) => this.persistEngineSessionId(engineSessionId),
           onUsage: (usage, cumulative) => this.recordUsage(usage, cumulative),
-          onTurnEnd: () => {
-            // 回合结束：队列里还有背靠背排队的消息时引擎马上继续跑，保持 busy；
-            // 否则标记空闲——disposeIdleSessions（更换 LLM/MCP 配置后调用）
-            // 才能回收热会话，让下一条消息按新配置 resume 重建。（此前 busy
-            // 在引擎循环存活期间一直为 true，配置变更永远跳过热会话。）
-            this.busy = this.turnQueue.pending > 0;
+          onTurnEnd: (queued) => {
+            // 回合结束：引擎队列里还有用户消息（背靠背排队的、回合中补充
+            // 但未并入的）时引擎马上继续跑，保持 busy——既不清热会话回收
+            // 计时器，也不让配置变更把正在处理的会话拆掉。队列空了才标记
+            // 空闲：disposeIdleSessions（更换 LLM/MCP 配置后调用）才能回收
+            // 热会话，让下一条消息按新配置 resume 重建。（此前 busy 在引擎
+            // 循环存活期间一直为 true，配置变更永远跳过热会话。）
+            // turnQueue.pending 只覆盖「服务端还没写进引擎」的那部分，
+            // 引擎自己队列里的由 queued_turn_count 反映。
+            const engineQueued = (queued ?? 0) > 0;
+            this.busy = engineQueued || this.turnQueue.pending > 0;
             this.turnActive = false;
             this.gate.resetTurn();
-            this.disarmWatchdog();
-            this.scheduleIdleClose();
+            // 队列空了才解除看门狗：后续回合会接着来（引擎队列里排队，或
+            // 服务端 TurnQueue 里还没写入引擎），此时仍处在一段工作期内，
+            // 卡死同样要能被判死。
+            if (this.busy) {
+              // 后续回合接着来：看门狗重新计时（不靠用户催促续期），
+              // 空闲回收计时器要清掉——引擎正在工作，不能被当成空闲拆掉。
+              this.turnActive = true;
+              this.armWatchdog();
+              this.touch();
+            } else {
+              this.disarmWatchdog();
+              this.scheduleIdleClose();
+            }
           },
           onDelegateStart: (toolUseId, key) => this.gate.ensure(toolUseId, key),
           onDelegateEnd: (toolUseId) => this.gate.releaseToolUse(toolUseId),
@@ -285,10 +301,8 @@ export class AgentSession {
     this.busy = true;
     // 排队的后续消息不重置看门狗死线：死线只随引擎消息续期。引擎卡死时
     // 用户的催促不该把死线越推越远（实测连发消息能无限顺延触达时间）。
-    if (!this.turnActive) {
-      this.turnActive = true;
-      this.armWatchdog();
-    }
+    this.turnActive = true;
+    this.armWatchdog();
   }
 
   async interrupt(): Promise<void> {

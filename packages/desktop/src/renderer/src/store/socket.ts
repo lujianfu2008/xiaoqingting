@@ -126,26 +126,58 @@ export function isActiveSocket(ws: WebSocket): boolean {
 // ---------- 发送确认（ack） ----------
 // user_message 发出后等服务端回显 user_text 块作为送达确认；断线/半开时
 // 消息丢失则超时（或断线即刻）触发 onFail：提示 + 复位 busy + 文本放回输入框。
+// 按 client_msg_id 记账：回合进行中连发补充消息时多条同时在途，单槽位会
+// 互相覆盖（后发那条把先发那条的确认顶掉）。
 
 const SEND_ACK_TIMEOUT_MS = 15_000;
 
-const pendingAcks = new Map<string, { timer: ReturnType<typeof setTimeout>; onFail: () => void }>();
+const pendingAcks = new Map<
+  string,
+  {
+    sessionId: string;
+    text: string;
+    timer: ReturnType<typeof setTimeout>;
+    onFail: () => void;
+  }
+>();
 
-export function armSendAck(sessionId: string, onFail: () => void): void {
-  clearSendAck(sessionId);
+export function armSendAck(
+  msgId: string,
+  sessionId: string,
+  text: string,
+  onFail: () => void,
+): void {
+  clearSendAck(msgId);
   const timer = setTimeout(() => {
-    pendingAcks.delete(sessionId);
+    pendingAcks.delete(msgId);
     onFail();
   }, SEND_ACK_TIMEOUT_MS);
-  pendingAcks.set(sessionId, { timer, onFail });
+  pendingAcks.set(msgId, { sessionId, text, timer, onFail });
 }
 
-export function clearSendAck(sessionId: string): void {
-  const p = pendingAcks.get(sessionId);
+export function clearSendAck(msgId: string): void {
+  const p = pendingAcks.get(msgId);
   if (p) {
     clearTimeout(p.timer);
-    pendingAcks.delete(sessionId);
+    pendingAcks.delete(msgId);
   }
+}
+
+/** 老服务端不回显 client_msg_id 时的兜底：按文本匹配解除该会话最早的一条。 */
+export function clearSendAckByText(sessionId: string, text: string): void {
+  for (const [id, p] of pendingAcks) {
+    if (p.sessionId !== sessionId || p.text !== text) continue;
+    clearTimeout(p.timer);
+    pendingAcks.delete(id);
+    return;
+  }
+}
+
+/** 该会话还在等确认的发送条数（>0 表示本地还有消息没被服务端接手）。 */
+export function pendingAcksForSession(sessionId: string): number {
+  let n = 0;
+  for (const p of pendingAcks.values()) if (p.sessionId === sessionId) n++;
+  return n;
 }
 
 /** Abnormal disconnect: fail every in-flight send immediately with feedback. */

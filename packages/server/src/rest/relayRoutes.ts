@@ -5,17 +5,17 @@ import { appendAudit } from "../audit.js";
 import { isPublicAdmin } from "../users.js";
 import {
   getRelayOptIn,
-  getRelayOptInUsernames,
   loadRelayConfig,
   saveRelayConfig,
   setRelayOptIn,
 } from "../relay/relayConfig.js";
-import { closeBridge, ensureBridge } from "../relay/llmBridge.js";
+import { failAllPending, failPendingForProxy } from "../relay/llmBridge.js";
 import { relayRegistry } from "../relay/registry.js";
 
 // 网络中继（消息级 LLM 桥）的 REST 端点。
-// 用户侧（/api/me/relay）：只有 opt-in 一个布尔——借出本机网络必须自愿；
-// opt-in 时预建该用户的桥端口，退出时关闭。
+// 用户侧（/api/me/relay）：只有 opt-in 一个布尔——借出本机网络必须自愿。
+// 入口端口是常驻共享的（启动即监听），opt-in 只影响「能否被选为代发人」，
+// 不需要按用户建/关端口；退出时立刻失败其代为转发的在途请求。
 // 管理侧（/api/admin/relay/config）：总开关，写审计；翻转影响引擎 env 注入，
 // 丢弃全部空闲会话让下一条消息重建（与 MCP 全局变更同款）。
 
@@ -32,23 +32,17 @@ export function registerRelayRoutes(app: FastifyInstance, manager: AgentManager)
 
   app.get("/api/me/relay", (req) => myRelayStatus(req.userId));
 
-  app.put("/api/me/relay", async (req, reply) => {
+  app.put("/api/me/relay", (req, reply) => {
     // 只接受 { opt_in: boolean }——用户侧没有别的可配项。
     const body = (req.body ?? {}) as { opt_in?: unknown };
     if (typeof body.opt_in !== "boolean") {
       return reply.code(400).send({ error: "invalid_request" });
     }
     setRelayOptIn(req.userId, body.opt_in);
-    // 桥端口跟随 opt-in 生命周期（engine env 注入依赖端口就绪）。
-    if (body.opt_in && loadRelayConfig().enabled) {
-      try {
-        await ensureBridge(req.userId);
-      } catch (err) {
-        console.error(`[relay] LLM 桥创建失败 user=${req.userId}:`, err);
-        return reply.code(500).send({ error: "bridge_failed" });
-      }
-    } else if (!body.opt_in) {
-      closeBridge(req.userId);
+    // 入口端口常驻，opt-in 只改变「谁可作为代发人」；退出时立即失败该用户
+    // 正在代为转发的在途请求，别让引擎干等到超时。
+    if (!body.opt_in) {
+      failPendingForProxy(req.userId, 503, "网络中继已停用：桌面端不再代为转发");
     }
     // env 在会话创建时固定：丢弃空闲会话，下一条消息按新状态重建。
     manager.disposeIdleSessions(req.userId);
@@ -79,17 +73,10 @@ export function registerRelayRoutes(app: FastifyInstance, manager: AgentManager)
       target: "-",
       detail: { enabled: cfg.enabled },
     });
-    // 总开关翻转影响 env 注入：开启时为所有 opt-in 用户预建桥，关闭时全关。
-    if (cfg.enabled && !before) {
-      for (const username of getRelayOptInUsernames()) {
-        try {
-          await ensureBridge(username);
-        } catch (err) {
-          console.error(`[relay] LLM 桥创建失败 user=${username}:`, err);
-        }
-      }
-    } else if (!cfg.enabled && before) {
-      for (const username of getRelayOptInUsernames()) closeBridge(username);
+    // 总开关翻转影响 env 注入：关闭时立刻失败全部在途中继请求（入口不再可用），
+    // 空闲会话一并丢弃；开启时无需预建任何东西——入口常驻，代发人逐请求选。
+    if (!cfg.enabled && before) {
+      failAllPending(503, "网络中继已被管理员关闭");
     }
     if (before !== cfg.enabled) manager.disposeAllIdleSessions();
     return {

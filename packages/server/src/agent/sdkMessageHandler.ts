@@ -27,8 +27,10 @@ export interface MessageSink {
    *  true（modelUsage 口径）时直接替换——modelUsage 本身就是跨回合累计值。 */
   onUsage(usage: Usage, cumulative?: boolean): void;
   /** A turn just finished (result delivered) — the caller uses this to arm the
-   *  idle reaper while the engine loop stays alive between turns. */
-  onTurnEnd?(): void;
+   *  idle reaper while the engine loop stays alive between turns.
+   *  queued = 引擎队列里还剩的用户消息数（含回合中被并入的补充消息）：>0 表示
+   *  不用再输入引擎就会继续下一回合，调用方不得标记空闲。 */
+  onTurnEnd?(queued?: number): void;
   // ---------- 子代理委派记账（回调给 AgentSession 的 DelegationGate） ----------
   /** 主线程发起委派（Agent 工具 tool_use，canUseTool 放行后到达这里）。 */
   onDelegateStart?(toolUseId: string, subagentKey: string): void;
@@ -239,6 +241,13 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
         };
       }
       if (usage) sink.onUsage(usage, cumulative);
+      // 队列里还有用户消息（回合中补充的内容没被本回合并入）时引擎会继续
+      // 跑；透传给客户端以保持 busy。sdk.d.ts 有声明但运行时可能缺失，
+      // 故按 unknown 防御读取。
+      const queued =
+        typeof (message as { queued_turn_count?: unknown }).queued_turn_count === "number"
+          ? (message as { queued_turn_count: number }).queued_turn_count
+          : undefined;
       sink.send({
         type: "result",
         session_id: sid,
@@ -246,8 +255,9 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
         duration_ms: "duration_ms" in message ? message.duration_ms : undefined,
         num_turns: "num_turns" in message ? message.num_turns : undefined,
         usage,
+        ...(queued !== undefined ? { queued_turn_count: queued } : {}),
       });
-      sink.onTurnEnd?.();
+      sink.onTurnEnd?.(queued);
       break;
     }
 

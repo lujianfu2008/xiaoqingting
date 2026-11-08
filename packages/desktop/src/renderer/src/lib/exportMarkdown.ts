@@ -15,6 +15,7 @@ const FLOW_ACTION_LABEL: Record<FlowAction, string> = {
   report_issue: "反馈问题",
   resubmit: "重新提测",
   pass: "测试通过",
+  cancel: "取消任务",
 };
 
 // 把一个会话的 blocks 拼成可读的 Markdown：标题 + 导出时间头部，

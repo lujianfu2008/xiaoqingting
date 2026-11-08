@@ -7,9 +7,8 @@ import { Store } from "./store.js";
 import { registerRoutes } from "./rest/routes.js";
 import { handleConnection } from "./ws/handler.js";
 import { handleRelayConnection } from "./ws/relayHandler.js";
-import { ensureBridgesAtStartup } from "./relay/llmBridge.js";
+import { setRelayProxyResolver, startRelayIngress } from "./relay/llmBridge.js";
 import { startOpenAiCompatServer } from "./openaiCompat.js";
-import { getRelayOptInUsernames, loadRelayConfig } from "./relay/relayConfig.js";
 
 async function main(): Promise<void> {
   ensureDataDirs();
@@ -36,13 +35,13 @@ async function main(): Promise<void> {
   // OpenAI 协议适配层：共享翻译端口，会话构建时 env 注入依赖它就绪。
   await startOpenAiCompatServer();
 
+  // 网络中继：共享入口端口承载所有会话（主人在路径里），代发人逐请求解析。
+  // 「当前负责人」由 AgentManager 晚绑定注入——relay 层不依赖 agent 层。
+  await startRelayIngress();
+  setRelayProxyResolver((sid) => manager.executorOf(sid));
+
   await app.listen({ port: config.port, host: config.host });
   console.log(`小蜻蜓服务端已启动: http://${config.host}:${config.port}`);
-
-  // 网络中继：为已有 opt-in 用户预建 LLM 桥端口（引擎 env 注入依赖端口就绪）。
-  if (loadRelayConfig().enabled) {
-    await ensureBridgesAtStartup(getRelayOptInUsernames());
-  }
 }
 
 main().catch((err) => {

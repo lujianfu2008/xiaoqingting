@@ -132,11 +132,11 @@ export function useVoiceInput(
         if (fromShortcut) setVoiceMsg(t("vm.toDraft"));
         return;
       }
-      const state = useStore.getState();
-      const isBusy = currentSessionId ? (state.busy[currentSessionId] ?? false) : false;
-      if (isBusy) {
+      // 回合进行中也直接发送：服务端会把它并入当前回合（补充消息），与
+      // 输入框 Enter 的行为一致；只有没选中会话时才放回输入框。
+      if (!currentSessionId) {
         appendDraft(text);
-        setVoiceMsg(t("vm.busyDraft"));
+        setVoiceMsg(t("vm.toDraft"));
       } else {
         send(text);
       }

@@ -15,6 +15,9 @@ export type TextBlock = z.infer<typeof TextBlock>;
 export const UserTextBlock = z.object({
   kind: z.literal("user_text"),
   text: z.string(),
+  // 发送方的送达确认 id（WsUserMessage.client_msg_id 回显）；其他成员发出的
+  // 消息没有这个字段，客户端不会误清自己的 ack。
+  client_msg_id: z.string().optional(),
 });
 export type UserTextBlock = z.infer<typeof UserTextBlock>;
 

@@ -93,12 +93,13 @@ export class ClientRequests {
     if (this.isDisposed()) {
       return Promise.resolve({ ok: false, error: "会话已关闭。" });
     }
-    // Local actions run on the current executor's client (工作台跟随指派). If
-    // they are offline, fail now instead of waiting for the full client timeout.
+    // Local actions run on the current exec target's client (协作任务跟随负责
+    // 人，普通会话跟随最近发言人). If they are offline, fail now instead of
+    // waiting for the full client timeout.
     if (this.events.isExecutorOnline && !this.events.isExecutorOnline()) {
       return Promise.resolve({
         ok: false,
-        error: "当前负责人不在线，无法执行本机操作。请稍后再试。",
+        error: "当前执行本机操作的用户不在线，无法执行。请稍后再试。",
       });
     }
     const requestId = this.pendingExecs.nextId();

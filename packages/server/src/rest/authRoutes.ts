@@ -19,6 +19,7 @@ import {
 import {
   getEmployeeId,
   employeeIdTaken,
+  resolveUsername,
   getRole,
   isDisabled,
   getStatus,
@@ -35,14 +36,16 @@ export function registerAuthRoutes(app: FastifyInstance, manager: AgentManager):
     const parsed = LoginRequest.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
     const { username, password } = parsed.data;
-    // 防爆破：用户名+IP 维度失败锁定（只在密码错误时计次，待审核等状态不锁定）。
-    const key = loginKeyOf(username, req);
+    // username 字段是「用户名或工号」：先解析成唯一账号，后续全部用规范用户名。
+    const canonical = resolveUsername(username) ?? username;
+    // 防爆破：用户名+IP 维度失败锁定（按规范用户名归一，两种写法共享同一计数）。
+    const key = loginKeyOf(canonical, req);
     const gate = checkLogin(key);
     if (!gate.ok) {
       reply.header("retry-after", gate.retryAfterSec);
       return reply.code(429).send({ error: "too_many_attempts", retry_after: gate.retryAfterSec });
     }
-    if (isDisabled(username)) {
+    if (isDisabled(canonical)) {
       return reply.code(403).send({ error: "account_disabled" });
     }
     if (!verifyCredentials(username, password)) {
@@ -50,15 +53,15 @@ export function registerAuthRoutes(app: FastifyInstance, manager: AgentManager):
       return reply.code(401).send({ error: "invalid_credentials" });
     }
     // 注册审核：待审核/已拒绝的账号不能登录（放在凭据校验之后，避免向猜密码者泄露账号状态）。
-    const status = getStatus(username);
+    const status = getStatus(canonical);
     if (status === "pending") return reply.code(403).send({ error: "pending_review" });
     if (status === "rejected") return reply.code(403).send({ error: "review_rejected" });
     recordLoginSuccess(key);
     const body: LoginResponse = {
-      token: signToken(username),
-      username,
-      employee_id: getEmployeeId(username),
-      role: getRole(username),
+      token: signToken(canonical),
+      username: canonical,
+      employee_id: getEmployeeId(canonical),
+      role: getRole(canonical),
     };
     return reply.send(body);
   });

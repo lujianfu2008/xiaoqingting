@@ -1,6 +1,6 @@
 import type { BlmState, GetState, SetState } from "../types";
 import { apiBase } from "../http";
-import { clearIdentity, LS, saveIdentity } from "../persist";
+import { clearIdentity, LS, rememberLoginName, saveIdentity } from "../persist";
 import {
   currentSocket,
   resetReconnect,
@@ -82,6 +82,7 @@ export function createAuthActions(
       // Trust the server's values: the cached username may differ from the input.
       const data = (await res.json()) as AuthResponse;
       saveIdentity(serverUrl, data.token, data.username, data.employee_id, data.role);
+      rememberLoginName(data.username);
       set({
         serverUrl,
         token: data.token,

@@ -2,7 +2,7 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionRecord } from "../store.js";
 import { config } from "../config.js";
 import { getUserLlmConfig, getUserMaxBudgetUsd, modelSupportsVision } from "../llmConfig.js";
-import { relayEnvFor } from "../relay/llmBridge.js";
+import { relayIngressFor } from "../relay/llmBridge.js";
 import { openaiCompatBaseFor } from "../openaiCompat.js";
 import type { AgentRole } from "./agents.js";
 import { buildMcpServers } from "./mcp.js";
@@ -107,20 +107,22 @@ export function buildSessionOptions(
     engineEnv.ANTHROPIC_MODEL = undefined; // model 只经 options.model 传入
   }
   // OpenAI 协议网关：引擎的 Anthropic 请求发往本地翻译层（鉴权/真实目标都在
-  // 服务端处置）。适配层未启动（理论上仅启动早期）则维持原样。
+  // 服务端处置）。适配层未启动（理论上仅启动早期）则维持原样。路径带 session_id：
+  // 翻译层据此在请求时解析「当前负责人」决定借哪台桌面代发（工作台跟随指派）。
   const compatBase = llm?.protocol === "openai" ? openaiCompatBaseFor() : null;
   if (llm && compatBase) {
-    engineEnv.ANTHROPIC_BASE_URL = `${compatBase}/t/${encodeURIComponent(record.user_id)}`;
+    engineEnv.ANTHROPIC_BASE_URL = `${compatBase}/t/${encodeURIComponent(record.user_id)}/s/${encodeURIComponent(record.session_id)}`;
   }
-  // 网络中继（消息级 LLM 桥）：管理员总开关 + 用户 opt-in 同时开启时，引擎的
-  // LLM base_url 指向该用户的本地桥端口，请求作为 WS 消息由桌面端代发。桌面
-  // 暂离也注入（桥回 503 JSON，走既有 agent_error 路径，桌面重连后自动恢复，
-  // 会话无需重建）；中继关闭时不注入，行为与现状一致。放在 llm 块之后覆盖
-  // 个人 base_url——真实目标由桥在每条请求里给桌面端。OpenAI 协议时不覆盖：
-  // 引擎已指向翻译层，翻译层自己决定是否经桥发上游。
-  const relay = relayEnvFor(record.user_id);
-  if (relay && !compatBase) {
-    engineEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${relay.port}`;
+  // 网络中继（消息级 LLM 桥）：管理员总开关开启且主人或当前负责人 opt-in 时，
+  // 引擎的 LLM base_url 指向共享中继入口，请求作为 WS 消息由某台桌面端代发。
+  // 入口地址**不写死代发人**——代发人逐请求解析（负责人优先、主人兜底），
+  // 任务流转换负责人无需重建会话。桌面此刻全离线也注入：请求时回 503 走既有
+  // agent_error 路径，任一桌面重连后下一条消息自动恢复。放在 llm 块之后覆盖
+  // 个人 base_url——真实目标由入口在每条请求里给桌面端。OpenAI 协议时不覆盖：
+  // 引擎已指向翻译层，翻译层自己决定是否借桌面发上游。
+  const relayBase = relayIngressFor(record.user_id, record.session_id);
+  if (relayBase && !compatBase) {
+    engineEnv.ANTHROPIC_BASE_URL = relayBase;
   }
   // 费用上限：用户「我的大模型」里的设置优先（0 = 不限）；未设置跟全局
   // MAX_BUDGET_USD（<=0 = 不限）。上限耗尽时 CLI 会静默僵死，由回合看门狗

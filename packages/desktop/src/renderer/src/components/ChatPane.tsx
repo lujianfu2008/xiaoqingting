@@ -12,8 +12,9 @@ import { Splitter } from "./Splitter";
 // Module-level stable references: zustand selectors must not return fresh
 // object/array literals per call, or useSyncExternalStore loops (React #185).
 const EMPTY_BLOCKS: never[] = [];
-const INPUT_H_DEFAULT = 76;
-const INPUT_H_MIN = 64;
+const INPUT_H_DEFAULT = 110;
+// 两行按钮列（附件/话筒、发送/停止）需要约 94px；老版本存过更小的值，读取时兜底
+const INPUT_H_MIN = 96;
 const INPUT_H_MAX = 400;
 const CHAT_FS_DEFAULT = 14;
 const CHAT_FS_MIN = 11;
@@ -81,6 +82,7 @@ open.delete(b.id);
 return open.size;
 }, [blocks]);
 const error = useStore((s) => s.error);
+const notice = useStore((s) => s.notice);
 const wsStatus = useStore((s) => s.wsStatus);
 const voiceSettings = useStore((s) => s.voiceSettings);
 const recWake = useStore((s) => s.recWake);
@@ -98,7 +100,6 @@ const interrupt = useStore((s) => s.interrupt);
 const draft = useStore((s) => s.draft);
 const setDraft = useStore((s) => s.setDraft);
 const [noSessionHint, setNoSessionHint] = useState(false);
-const [busyHint, setBusyHint] = useState(false);
 const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
 const [attachHint, setAttachHint] = useState<string | null>(null);
 const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,17 +110,15 @@ const bottomRef = useRef<HTMLDivElement>(null);
 useEffect(() => {
 if (currentSessionId) setNoSessionHint(false);
 }, [currentSessionId]);
-// The "still busy" hint only makes sense while busy — clear it with the state.
-useEffect(() => {
-if (!busy) setBusyHint(false);
-}, [busy]);
 // Switching sessions drops unsent attachments — they belong to that chat.
 useEffect(() => {
 setAttachments([]);
 setAttachHint(null);
 }, [currentSessionId]);
 // Input-bar height and message font size, both user-adjustable and persisted.
-const [inputH, setInputH] = useState(() => loadNum(LS.inputHeight, INPUT_H_DEFAULT));
+const [inputH, setInputH] = useState(() =>
+Math.max(INPUT_H_MIN, loadNum(LS.inputHeight, INPUT_H_DEFAULT))
+);
 const [chatFs, setChatFs] = useState(() =>
 clamp(loadNum(LS.chatFontSize, CHAT_FS_DEFAULT), CHAT_FS_MIN, CHAT_FS_MAX),
 );
@@ -189,12 +188,9 @@ setAttachments((a) => (a.some((x) => x.path === p) ? a : [...a, { name, path: p,
 const submit = (): void => {
 const text = draft.trim();
 if ((!text && attachments.length === 0) || (sharedView && !ownerOnline)) return;
-// 上一条还在生成：明确提示而不是静默吞掉——卡住的 busy（模型挂死等）
-// 曾让用户「怎么发都没反应、没有任何状态」。
-if (busy) {
-setBusyHint(true);
-return;
-}
+// 回合进行中（busy）也可以发送：消息进入引擎队列，在两次工具调用之间被
+// 并入当前回合——用户想补充/更正时不必等上一条回复结束。回复没动静时
+// 仍可用旁边的「■ 停止」中断。
 // No session selected: the store's send() would silently no-op — tell the
 // user what to do instead, and keep the draft so nothing is lost.
 if (!currentSessionId) {
@@ -243,6 +239,7 @@ void addFiles(files);
 blocks={blocks}
 streamingText={streamingText}
 error={error}
+notice={notice}
 voiceMsg={voiceMsg}
 noSession={!currentSessionId}
 bottomRef={bottomRef}
@@ -277,11 +274,6 @@ onReset={() => setInputH(INPUT_H_DEFAULT)}
 {noSessionHint && (
 <div className="tool-block" style={{ color: "#e5a83a" }}>
 💡 {t("chat.noSession")}
-</div>
-)}
-{busyHint && (
-<div className="tool-block" style={{ color: "#e5a83a" }}>
-⏳ {t("chat.busyHint")}
 </div>
 )}
 {/* 后台子代理仍在跑（主回复的 result 可能已到、busy 已复位）：显式提示，
@@ -371,10 +363,10 @@ if (fl.length) void addFiles(fl);
 e.target.value = "";
 }}
 />
+<div className="btn-col side-col">
 <button
 title={canAttach ? t("chat.attach") : t("chat.attachDisabled")}
 disabled={!canAttach}
-style={{ fontSize: 18, padding: "8px 10px" }}
 onClick={() => fileInputRef.current?.click()}
 >
 📎
@@ -382,15 +374,26 @@ onClick={() => fileInputRef.current?.click()}
 <button
 title={recording ? t("chat.micStop") : t("chat.mic")}
 className={recording ? "recording" : ""}
-style={{ fontSize: 18, padding: "8px 10px" }}
 onClick={toggleRecording}
 >
 {recording ? "⏹" : "🎤"}
 </button>
+</div>
+<div className="btn-col main-col">
 {busy ? (
-<button className="primary" onClick={interrupt}>
+<>
+<button
+className="primary"
+title={t("chat.supplementTip")}
+disabled={(!draft.trim() && attachments.length === 0) || (sharedView && !ownerOnline)}
+onClick={submit}
+>
+{t("chat.supplement")}
+</button>
+<button className="stop-btn" title={t("chat.stopTip")} onClick={interrupt}>
 {t("chat.stop")}
 </button>
+</>
 ) : (
 <button
 className="primary"
@@ -400,6 +403,7 @@ onClick={submit}
 {t("chat.send")}
 </button>
 )}
+</div>
 </div>
 <div className="input-meta">
 <label title={t("side.trustTip")}>

@@ -97,6 +97,7 @@ export const FLOW_ACTION_LABEL: Record<FlowAction, string> = {
   report_issue: "反馈问题",
   resubmit: "重新提测",
   pass: "测试通过",
+  cancel: "取消任务",
 };
 
 // 协作流事件行：谁把任务从什么状态推进到什么状态（任务线程时间线）。

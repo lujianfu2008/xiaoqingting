@@ -45,6 +45,10 @@
   color: var(--danger);
 }
 
+.tool-block.notice {
+  color: #4aa3ff;
+}
+
 .input-bar {
   display: flex;
   gap: 10px;
@@ -57,7 +61,32 @@
   flex: 1;
   resize: none;
   height: 44px;
-  max-height: 120px;
+  max-height: none;
+}
+
+/* 附件/话筒与发送/停止各自成纵向两行按钮列，textarea 占中间剩余宽度 */
+.input-bar .btn-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+}
+
+.input-bar .side-col button {
+  min-width: 42px;
+  padding: 4px 10px;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.input-bar .main-col button {
+  min-width: 84px;
+  padding: 6px 12px;
+}
+
+.input-bar .stop-btn {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .input-bar .recording {

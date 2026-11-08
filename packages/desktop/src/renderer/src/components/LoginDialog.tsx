@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
+import { forgetLoginName, loadLoginHistory } from "../store/persist";
 import { DragonflyLogo } from "./DragonflyLogo";
 
 export function LoginDialog(): React.JSX.Element {
@@ -17,6 +18,9 @@ export function LoginDialog(): React.JSX.Element {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // 历史登录过的账号：点一下填用户名并聚焦密码框（只记名字，密码仍要输）。
+  const [history, setHistory] = useState<string[]>(() => loadLoginHistory());
+  const pwdRef = useRef<HTMLInputElement>(null);
   const t = useT();
 
   const submit = async (): Promise<void> => {
@@ -94,12 +98,65 @@ export function LoginDialog(): React.JSX.Element {
           <label>{t("li.username")}</label>
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
         </div>
+        {mode === "login" && history.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: -6 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>{t("li.recent")}</span>
+            {history.map((name) => (
+              <span
+                key={name}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                  background: name === username ? "rgba(74,163,255,.15)" : "transparent",
+                }}
+                onClick={() => {
+                  setUsername(name);
+                  pwdRef.current?.focus();
+                }}
+                title={t("li.recentPick")}
+              >
+                {name}
+                <button
+                  type="button"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--muted)",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontSize: 11,
+                    lineHeight: 1,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    forgetLoginName(name);
+                    setHistory((h) => h.filter((x) => x !== name));
+                  }}
+                  title={t("li.recentForget")}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="field">
           <label>
             {t("li.password")}
             {mode === "register" ? t("li.passwordMin") : ""}
           </label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input
+            ref={pwdRef}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </div>
         {localLock && (
           <div className="error-text">

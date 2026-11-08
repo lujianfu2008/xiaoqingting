@@ -28,8 +28,10 @@ export class AgentManager {
     this.registry = new SessionRegistry(store);
     this.updateRequests = new UpdateRequestManager(store, this.conns);
     this.tasks = new TaskManager(store, this.conns, this.registry);
-    // 工作台跟随指派：本机执行/审批的目标由任务当前负责人决定（晚绑定防循环构造）。
-    this.conns.execTargetResolver = (sid) => this.tasks.executorOf(sid);
+    // 工作台跟随指派：本机执行/审批的目标由任务当前负责人决定；无任务的共享
+    // 会话跟随最近发言人（谁驱动会话就在谁机器上执行），再回退主人（晚绑定防循环构造）。
+    this.conns.execTargetResolver = (sid) =>
+      this.tasks.executorOf(sid) ?? this.router.lastSpeakerOf(sid);
     this.router = new MessageRouter(store, this.conns, this.sessions, this.updateRequests, this.tasks);
   }
 
@@ -160,12 +162,16 @@ export class AgentManager {
   ): { ok: true } | { ok: false; code: "not_found" | "task_active" } {
     // Stop the live engine first so it cannot append to a record being removed.
     if (!this.registry.isOwner(userId, sessionId)) return { ok: false, code: "not_found" };
-    // 协作流任务线程守卫：任务未完结不可删（防撕掉时间线与共享视图）；
-    // done 后可删，任务记录保留（客户端列表降级灰显）。
+    // 协作流任务线程守卫：任务未完结时，删除即取消（仅需求方——会话主人就是
+    // 任务需求方，删线程=放弃任务，流转守卫在 TaskManager.flow）；非需求方
+    // 过不了 isOwner 到不了这里。done 后直接删，任务记录保留（客户端列表降级灰显）。
     const rec = this.store.getSession(sessionId);
     if (rec?.task_id) {
       const task = this.tasks.getTask(rec.task_id);
-      if (task && task.status !== "done") return { ok: false, code: "task_active" };
+      if (task && task.status !== "done") {
+        const cancelled = this.tasks.flow(userId, task.task_id, { action: "cancel" });
+        if (!cancelled.ok) return { ok: false, code: "task_active" };
+      }
     }
     this.sessions.get(sessionId)?.dispose();
     this.sessions.delete(sessionId);
@@ -188,6 +194,11 @@ export class AgentManager {
     title: string,
   ): { ok: true; rec: SessionRecord } | { ok: false; code: "not_found" | "forbidden" } {
     return this.registry.renameSession(userId, sessionId, title);
+  }
+
+  /** 任务当前负责人（无协作任务/记录缺失时为 null）。LLM 中继据此选代发桌面。 */
+  executorOf(sessionId: string): string | null {
+    return this.tasks.executorOf(sessionId);
   }
 
   // ---------- 协作流任务 ----------
@@ -234,8 +245,8 @@ export class AgentManager {
 
   // ---------- WS routing ----------
 
-  handleUserMessage(userId: string, sessionId: string, text: string): void {
-    this.router.handleUserMessage(userId, sessionId, text);
+  handleUserMessage(userId: string, sessionId: string, text: string, clientMsgId?: string): void {
+    this.router.handleUserMessage(userId, sessionId, text, clientMsgId);
   }
 
   handleInterrupt(userId: string, sessionId: string): void {

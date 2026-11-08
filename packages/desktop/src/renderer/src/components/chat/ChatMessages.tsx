@@ -7,6 +7,8 @@ interface ChatMessagesProps {
   blocks: Block[];
   streamingText: string;
   error: string | null;
+  /** 任务/协作流轻提示：数秒自动消失的信息条（与常驻 error 区分）。 */
+  notice: string | null;
   voiceMsg: string | null;
   /** No session selected: nudge toward picking/creating one instead of chatting. */
   noSession?: boolean;
@@ -17,6 +19,7 @@ export function ChatMessages({
   blocks,
   streamingText,
   error,
+  notice,
   voiceMsg,
   noSession,
   bottomRef,
@@ -48,6 +51,7 @@ export function ChatMessages({
       ))}
       {streamingText && <StreamingMessage text={streamingText} />}
       {error && <div className="tool-block error">{error}</div>}
+      {notice && <div className="tool-block notice">🔔 {notice}</div>}
       {voiceMsg && (
         <div className="tool-block" style={{ color: "var(--muted)" }}>
           🎤 {voiceMsg}

@@ -6,6 +6,9 @@ export const WsUserMessage = z.object({
   type: z.literal("user_message"),
   session_id: z.string(),
   text: z.string().min(1),
+  // 客户端生成的送达确认 id：服务端原样回显在 user_text 块上，发送方据此
+  // 解除自己那一条的 ack（回合进行中连发补充消息时不会互相覆盖）。
+  client_msg_id: z.string().optional(),
 });
 
 export const WsInterrupt = z.object({

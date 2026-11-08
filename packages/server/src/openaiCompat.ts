@@ -1,15 +1,16 @@
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getUserLlmConfig } from "./llmConfig.js";
-import { relayEnvFor } from "./relay/llmBridge.js";
+import { relayProxyFor, relayIngressPort } from "./relay/llmBridge.js";
 
 // OpenAI 协议适配层：把 Claude 引擎的 Anthropic Messages 请求翻译成
 // OpenAI chat/completions（国内网关大多只说 OpenAI 协议）。
 //
-// 链路：引擎 → 本翻译端口 /t/<user>/v1/messages → (用户中继桥 ‖ 直连) →
-// 上游网关。鉴权在服务端注入（存储的个人 key），引擎带来的认证头一律忽略。
-// 上游优先走中继桥：很多网关（如联通 AIGW）拦数据中心 IP 的 POST，只有
-// 用户桌面网络可达——桥在，请求就走桥；桥不在（中继没开）则服务端直连。
+// 链路：引擎 → 本翻译端口 /t/<user>/s/<session>/v1/messages → (共享中继入口 ‖
+// 直连) → 上游网关。鉴权在服务端注入（存储的个人 key），引擎带来的认证头一律
+// 忽略。session 只用于解析「当前负责人」：很多网关（如联通 AIGW）拦数据中心
+// IP 的 POST，只有用户桌面网络可达——负责人桌面可用就先借它，其次主人的；
+// 都不可用（中继没开、无人 opt-in 或桌面全离线）则服务端直连。
 //
 // 对引擎而言这是一个标准的 Anthropic 端点：流式回 Anthropic SSE 事件序列，
 // 非流式回 Anthropic message JSON，错误回 Anthropic error JSON。
@@ -425,16 +426,35 @@ async function readBody(req: IncomingMessage, maxBytes: number): Promise<string>
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** 上游地址：用户中继桥（桌面网络）优先，否则服务端直连个人 base_url。 */
-function upstreamFor(username: string, cfg: { base_url?: string }): { url: string; viaRelay: boolean } | null {
-  const relay = relayEnvFor(username);
-  if (relay) return { url: `http://127.0.0.1:${relay.port}/chat/completions`, viaRelay: true };
+/** 上游地址：借用在线桌面（当前负责人优先、会话主人兜底）转发；没有桌面可借
+ *  时若本可借网则服务端直连（尽力而为），否则返回 null 让调用方报配置错误。
+ *  ≥1 台桌面在线时必须借——桌面离线时要直连（2026-11-02 的坑：桥端口常年
+ *  监听，但桌面离线时桥回 503，不先判在线等于把可直连的网关永久打成不可用）。 */
+function upstreamFor(
+  username: string,
+  sessionId: string | null,
+  cfg: { base_url?: string },
+): { url: string; viaRelay: boolean; proxy?: string } | null {
+  const ingress = relayIngressPort();
+  const proxy = ingress != null ? relayProxyFor(username, sessionId) : null;
+  if (proxy && ingress != null) {
+    return {
+      url: `http://127.0.0.1:${ingress}/u/${encodeURIComponent(username)}${sessionId ? `/s/${encodeURIComponent(sessionId)}` : ""}/chat/completions`,
+      viaRelay: true,
+      proxy,
+    };
+  }
   const base = cfg.base_url?.replace(/\/+$/, "");
   if (!base) return null;
   return { url: `${base}/chat/completions`, viaRelay: false };
 }
 
-async function handleMessages(username: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleMessages(
+  username: string,
+  sessionId: string | null,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   const cfg = getUserLlmConfig(username);
   if (!cfg?.api_key) {
     sse(res, 401, "authentication_error", "未配置个人 LLM Key（OpenAI 协议需要）。");
@@ -454,13 +474,13 @@ async function handleMessages(username: string, req: IncomingMessage, res: Serve
     sse(res, 400, "invalid_request_error", "缺少模型名。");
     return;
   }
-  const upstream = upstreamFor(username, cfg);
+  const upstream = upstreamFor(username, sessionId, cfg);
   if (!upstream) {
     sse(res, 400, "invalid_request_error", "OpenAI 协议需要在 LLM 设置里填写 base_url。");
     return;
   }
   console.info(
-    `[llm] ${username} model=${model} → ${upstream.viaRelay ? "中继桥" : "直连"} ${upstream.url}`,
+    `[llm] ${username} model=${model} → ${upstream.viaRelay ? `中继桥(代发 ${upstream.proxy})` : "直连"} ${upstream.url}`,
   );
 
   const oaiBody = anthropicToOpenAiRequest(body, model);
@@ -567,8 +587,10 @@ export function startOpenAiCompatServer(): Promise<void> {
 }
 
 async function handleCompatRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // 只回答 POST /t/<user>/v1/messages[/count_tokens]，其余一律 Anthropic 404。
-  // 引擎（Claude CLI）实际请求带查询参数（v1/messages?beta=true）——路由前必须剥掉。
+  // 只回答 POST /t/<user>[/s/<session>]/v1/messages[/count_tokens]，其余一律
+  // Anthropic 404。引擎（Claude CLI）实际请求带查询参数（v1/messages?beta=true）
+  // ——路由前必须剥掉。session 可缺省（老会话的 base_url 没有它）：
+  // 缺省时代发人解析退化为「只用会话主人」。
   const path = (req.url ?? "").split("?")[0];
   // SDK 对引擎 base 做探活（HEAD <base>/api/hello）：翻译层是常驻端口，直接答 200。
   if (req.method === "HEAD" && path.endsWith("/api/hello")) {
@@ -576,14 +598,15 @@ async function handleCompatRequest(req: IncomingMessage, res: ServerResponse): P
     res.end();
     return;
   }
-  const m = /^\/t\/([^/]+)\/v1\/messages(\/count_tokens)?$/.exec(path);
+  const m = /^\/t\/([^/]+)(?:\/s\/([^/]+))?\/v1\/messages(\/count_tokens)?$/.exec(path);
   if (req.method !== "POST" || !m) {
     console.warn(`[llm] 翻译层 404: ${req.method} ${req.url ?? ""}`);
     sse(res, 404, "not_found_error", "未知端点。");
     return;
   }
   const username = decodeURIComponent(m[1]);
-  if (m[2]) {
+  const sessionId = m[2] ? decodeURIComponent(m[2]) : null;
+  if (m[3]) {
     // count_tokens：引擎拿它做上下文估算，给个保守近似即可。
     const raw = await readBody(req, 8 * 1024 * 1024).catch(() => "");
     const chars = raw.length;
@@ -592,6 +615,7 @@ async function handleCompatRequest(req: IncomingMessage, res: ServerResponse): P
     return;
   }
   // 客户端（引擎）断开 → 连带放弃上游请求由 fetch 的 signal 链路处理：
-  // 翻译层没有独立的 abort 通道，流式循环随 res 关闭自然终止。
-  await handleMessages(username, req, res);
+  // 翻译层没有独立的 abort 通道，流式循环随 res 关闭自然终止；借道中继时
+  // 桥的 res close 会把 llm_cancel 转发给代发桌面。
+  await handleMessages(username, sessionId, req, res);
 }

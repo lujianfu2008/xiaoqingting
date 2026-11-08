@@ -144,8 +144,8 @@ export function useWakeWord(): void {
             const s = useStore.getState();
             if (s.recording || s.speaking) return false; // 录音中/朗读中不听
             if (s.pendingPermission || s.pendingExec) return false; // 确认弹窗打开时不听
-            const sid = s.currentSessionId;
-            if (sid && (s.busy[sid] ?? false)) return false; // 智能体回复中不听
+            // 智能体回复中也继续监听：语音补充会并入当前回合（与文字一致），
+            // 不必把用户晾到回复结束。
             return Date.now() - lastDetectedRef.current >= COOLDOWN_MS;
           },
         });

@@ -91,7 +91,12 @@ export function handleConnection(
 
     switch (msg.data.type) {
       case "user_message":
-        manager.handleUserMessage(payload.uid, msg.data.session_id, msg.data.text);
+        manager.handleUserMessage(
+          payload.uid,
+          msg.data.session_id,
+          msg.data.text,
+          msg.data.client_msg_id,
+        );
         break;
       case "interrupt":
         manager.handleInterrupt(payload.uid, msg.data.session_id);

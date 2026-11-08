@@ -29,6 +29,7 @@ export const useStore = create<BlmState>((set, get) => ({
   role: storedRole === "admin" || storedRole === "reviewer" ? storedRole : "user",
   wsStatus: "disconnected",
   error: null,
+  notice: null,
   localLock: null,
   registeredPending: null,
   authNotice: null,

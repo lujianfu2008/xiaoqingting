@@ -76,6 +76,8 @@ function createWindow(): void {
   }
 }
 
+// 不加单实例锁：同机多实例登不同账号是协作流测试的标准姿势，必须保留；
+// 同账号双实例的互踢风暴由 relay 客户端的 4009 让位逻辑兜住（见 relay/index.ts）。
 app.whenReady().then(() => {
   // Required on Windows for Notification toasts (托盘最小化提示).
   app.setAppUserModelId("com.xiaoqingting.desktop");

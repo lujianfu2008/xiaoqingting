@@ -412,11 +412,20 @@ class RelayClient {
       // llm_cancel：服务端已放弃该响应（引擎侧中断），abort 本端请求。
       else this.pending.get(msg.data.req_id)?.abort();
     });
-    ws.on("close", () => {
+    ws.on("close", (code) => {
+      // 旧 socket 的迟到事件（reconfigure 已换新连接）——别动新连接的状态。
+      if (this.ws !== ws) return;
       this.clearPing();
       // 连接断了：在途请求全部 abort（服务端侧也会对引擎回 503，双保险）。
       for (const h of this.pending.values()) h.abort();
       this.pending.clear();
+      // 4009 superseded = 同账号另一实例接管了中继槽位（双实例并存）。
+      // 自动重接只会跟对方互踢（服务端新连必踢旧连），把两边在途请求全部
+      // 反复打断——让位并停止重连；对方退出后本实例重启才会重新借出。
+      if (code === 4009) {
+        console.error("[relay] 中继槽位被同账号另一实例接管（superseded），本实例停止重连");
+        return;
+      }
       this.scheduleReconnect();
     });
     ws.on("error", () => {

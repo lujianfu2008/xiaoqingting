@@ -116,7 +116,7 @@ export function registerSessionRoutes(
     const result = manager.deleteSession(req.userId, (req.params as { id: string }).id);
     if (result.ok) return reply.code(204).send();
     if (result.code === "task_active") {
-      return reply.code(409).send({ error: "task_active", message: "协作任务未完结，不能删除任务线程。" });
+      return reply.code(409).send({ error: "task_active", message: "协作任务未完结且自动取消失败，暂不能删除任务线程。" });
     }
     return reply.code(404).send({ error: "not_found" });
   });

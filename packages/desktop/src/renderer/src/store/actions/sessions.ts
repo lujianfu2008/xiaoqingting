@@ -165,10 +165,17 @@ export function createSessionActions(
         get().stopSpeaking();
         get().setExpr("normal");
       }
-      await fetch(`${apiBase(serverUrl)}/api/sessions/${id}`, {
+      const res = await fetch(`${apiBase(serverUrl)}/api/sessions/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
+      // 服务端拒绝（如协作任务线程守卫）：保留会话并提示——别造成「看似删掉、
+      // 刷新又回来」。404 = 服务端本就没有，照常清本地。
+      if (!res.ok && res.status !== 404) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string };
+        set({ error: body.message || t("task.deleteBlocked") });
+        return;
+      }
       void window.blm.forgetSession(id);
       set((s) => {
         const sessions = s.sessions.filter((x) => x.session_id !== id);
