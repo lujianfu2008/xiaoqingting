@@ -18,7 +18,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "sherpa-onnx-node": "^1.13.8",
-    "vosk": "^0.3.39"
+    "sherpa-onnx-node": "^1.13.8"
   }
 }

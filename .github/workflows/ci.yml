@@ -6,10 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# 本项目为 Windows 优先（离线 ASR / 唤醒词 / SAPI TTS 仅 Windows 验证），
+# 因此 CI 与运行平台保持一致，避免在 Linux 上编译平台相关的原生二进制。
 jobs:
   typecheck:
     name: Typecheck (all workspaces)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +23,7 @@ jobs:
 
   build:
     name: Build (all workspaces)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: [typecheck]
     steps:
       - uses: actions/checkout@v4
