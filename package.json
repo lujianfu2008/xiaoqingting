@@ -10,7 +10,9 @@
     "dev:server": "npm run dev -w @blm/server",
     "dev:desktop": "npm run dev -w @blm/desktop",
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "setup": "node setup.js",
+    "start:all": "start-all.bat"
   },
   "engines": {
     "node": ">=20"
