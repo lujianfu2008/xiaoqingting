@@ -45,7 +45,7 @@ export function fileTools(run: RunAction, attachmentMode: "image" | "ocr") {
 
   const chooseWorkdir = tool(
     "choose_workdir",
-    "请用户在电脑上重新选择（或更改）智能体的工作目录，会弹出目录选择窗口",
+    "请用户在电脑上重新选择（或更改）智能体的工作目录，会弹出目录选择窗口。仅当用户明确要求更改工作目录时才可调用；文件或目录找不到、路径不对时绝不要调用（先向用户说明情况），更不要反复重试",
     {},
     async () => textResult(await run("choose_workdir", {}, FILE_TIMEOUT_MS)),
   );

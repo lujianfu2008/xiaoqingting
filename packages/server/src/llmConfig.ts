@@ -179,9 +179,9 @@ export function clearUserLlmConfig(username: string): void {
 const VISION_MODEL_RE =
   /claude|sonnet|opus|haiku|glm-[.\d]*v|gpt-4o|gpt-5|gemini|qwen[.\d]*vl|pixtral|doubao.*vision/i;
 
-// Role models are SDK aliases ("sonnet"…); a deployment may remap them to a
-// non-Claude backend (ANTHROPIC_DEFAULT_SONNET_MODEL=GLM-…-Flash etc.). Vision
-// must be judged on the resolved name, not the alias.
+// Role models are SDK aliases ("sonnet"…); a deployment may remap them to
+// any backend via ANTHROPIC_DEFAULT_SONNET_MODEL etc. Vision must be
+// judged on the resolved name, not the alias.
 function resolveEngineModel(model: string): string {
   const alias = model.trim().toUpperCase();
   if (alias === "SONNET" || alias === "OPUS" || alias === "HAIKU") {
@@ -192,7 +192,7 @@ function resolveEngineModel(model: string): string {
 
 /**
  * Whether the engine model can view images directly. No model given → the
- * role default (Claude Sonnet) which has vision.
+ * role default model, which has vision.
  */
 export function modelSupportsVision(model?: string): boolean {
   if (!model) return true;

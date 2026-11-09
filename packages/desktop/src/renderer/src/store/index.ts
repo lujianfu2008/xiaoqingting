@@ -13,6 +13,8 @@ import { createLlmActions } from "./actions/llm";
 import { createRelayActions } from "./actions/relay";
 import { createMcpActions } from "./actions/mcp";
 import { createSkillActions } from "./actions/skills";
+import { createWorkflowActions } from "./actions/workflows";
+import { createScheduleActions } from "./actions/schedules";
 import { createChatActions } from "./actions/chat";
 import { createVoiceActions } from "./actions/voice";
 import { createBrowserActions } from "./actions/browser";
@@ -40,6 +42,7 @@ export const useStore = create<BlmState>((set, get) => ({
   projects: [],
   updateRequests: [],
   tasks: [],
+  schedules: [],
   auditLog: [],
   pendingReviewCount: 0,
   presence: {},
@@ -70,6 +73,8 @@ export const useStore = create<BlmState>((set, get) => ({
   globalMcpServers: null,
   skills: null,
   globalSkills: null,
+  workflows: null,
+  globalWorkflows: null,
   myRelay: null,
   adminRelayConfig: null,
   browser: { mode: "embedded", open: false, url: "", title: "" },
@@ -84,6 +89,8 @@ export const useStore = create<BlmState>((set, get) => ({
   ...createRelayActions(set, get),
   ...createMcpActions(set, get),
   ...createSkillActions(set, get),
+  ...createWorkflowActions(set, get),
+  ...createScheduleActions(set, get),
   ...createChatActions(set, get),
   ...createVoiceActions(set, get),
   ...createBrowserActions(set, get),

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { FlowAction, TaskStatus } from "./tasks.js";
 
 // ---------- Blocks (chat message content) ----------
 
@@ -65,17 +64,21 @@ export const TaskListBlock = z.object({
 export type TaskListBlock = z.infer<typeof TaskListBlock>;
 
 // 协作流事件（任务线程内的流转记录）：谁把任务从什么状态推进到什么状态。
-// 追加进会话历史，兼作时间线展示与流转凭证。
+// 追加进会话历史，兼作时间线展示与流转凭证。action/from_status/to_status 放宽
+// 为 string：历史块嵌旧枚举字面量（五状态/七动作）不改写，新事件用 v2 动作，
+// 两者并存；新事件另带自包含环节名（from_stage_name/to_stage_name），渲染无需反查任务。
 export const FlowEventBlock = z.object({
   kind: z.literal("flow_event"),
   id: z.string(),
   task_id: z.string(),
   task_title: z.string(),
   actor: z.string(), // 操作人用户名
-  action: FlowAction,
-  from_status: TaskStatus,
-  to_status: TaskStatus,
-  targets: z.array(z.string()).optional(), // 动作涉及的用户（如新指派的研发/测试）
+  action: z.string(),
+  from_status: z.string(),
+  to_status: z.string(),
+  from_stage_name: z.string().optional(), // 操作时的环节名（assign 即目标环节名）
+  to_stage_name: z.string().optional(), // 落点环节名；完结/取消省略
+  targets: z.array(z.string()).optional(), // 动作涉及的用户（如新指派的负责人）
   note: z.string().optional(),
   ts: z.string(),
 });

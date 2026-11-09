@@ -15,6 +15,7 @@ export function createAdminActions(
   | "decideUpdateRequest"
   | "listAdminUsers"
   | "setUserRole"
+  | "setUserPublicExec"
   | "setUserDisabled"
   | "listReviewUsers"
   | "decideReviewUser"
@@ -112,6 +113,23 @@ export function createAdminActions(
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             body: JSON.stringify({ disabled }),
+          },
+        );
+        return await okOrToast(res);
+      } catch {
+        return false;
+      }
+    },
+
+    async setUserPublicExec(username, enabled) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/admin/users/${encodeURIComponent(username)}/public-exec`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ enabled }),
           },
         );
         return await okOrToast(res);

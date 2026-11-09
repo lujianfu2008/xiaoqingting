@@ -81,6 +81,18 @@ const publicOpsPrompt =
   "标记必须与回复内容的情绪一致（如讲了笑话用开心，道歉或告知坏消息用难过），无特别情绪时用普通。" +
   "标记是给界面用的，除此之外不要在任何地方解释它。";
 
+// 公有域会话（已授权服务端命令执行的账号）：在 publicOpsPrompt 基础上
+// 把「不要执行命令」改为命令执行说明。与 toPublicRole 的字面替换配合：
+// publicOpsPrompt 内嵌于 publicExecOpsPrompt（保证另一侧替换锚点仍成立）。
+const publicExecOpsPrompt =
+  publicOpsPrompt.replace(
+    "不要尝试执行命令或浏览网页——公有域会话没有这些工具。",
+    "你可以在服务端的公有域工作空间内执行命令（run_command 工具，bash，当前目录即工作空间根目录），" +
+    "用于处理工作空间内的文件；网页内容也用 curl 等命令获取——公有域会话没有浏览器工具。" +
+    "命令产生的文件应留在公有域工作空间内；命令可以用重定向直接写入工作空间文件。" +
+    "不要尝试访问工作空间之外的路径。",
+  );
+
 export interface AgentRole {
   id: string;
   name: string;
@@ -204,8 +216,10 @@ const publicFileTools = [
  * 把角色改造成公有域变体：工具换成服务端 public 执行器、本机 client 工具全部
  * 禁用（防止绕过审核写到用户本机），操作提示词换成公域文案；其余（模型、
  * 角色特有叮嘱）保留。仅服务端使用，不影响对客户端展示的 AgentInfo。
+ * withExec = 会话主人已授权服务端命令执行：提示词换成含 run_command 的
+ * 公域文案，allowedTools 追加 run_command（真正的门在工具体内的授权检查）。
  */
-export function toPublicRole(role: AgentRole): AgentRole {
+export function toPublicRole(role: AgentRole, withExec = false): AgentRole {
   const sys = role.systemPrompt as {
     type: "preset";
     preset: "claude_code";
@@ -219,10 +233,14 @@ export function toPublicRole(role: AgentRole): AgentRole {
       type: "preset",
       preset: "claude_code",
       append: sys.append
-        .replace(localOpsPrompt, publicOpsPrompt)
+        .replace(localOpsPrompt, withExec ? publicExecOpsPrompt : publicOpsPrompt)
         .replace(delegationGuidance, ""),
     },
-    allowedTools: [...publicFileTools, ...keepTools],
+    allowedTools: [
+      ...publicFileTools,
+      ...(withExec ? ["mcp__public__run_command"] : []),
+      ...keepTools,
+    ],
     disallowedTools: [...serverSideTools, ...clientTools],
     permissionMode: "default",
   };

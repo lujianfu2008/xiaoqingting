@@ -12,8 +12,8 @@ release/
 !.env.example
 # 运行时数据（会话历史、用户、加密 API Key、MCP 配置）
 data/
-# Claude Code 本机配置
-.claude/settings.local.json
+# 开发者本机的 agent 工具配置（不入库）
+.claude/
 # 证书/私钥类（兜底）
 *.pem
 *.key

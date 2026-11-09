@@ -7,8 +7,9 @@ import { config } from "./config.js";
 import { assertPublicHttpUrl } from "./mcpConfig.js";
 
 // 专家技能配置：全局（data/skills/global/，管理员维护）+ 用户级
-// （data/skills/users/<username>/，本人维护）。每个目录本身是一个 Claude Code
-// 插件（.claude-plugin/plugin.json + skills/<name>/SKILL.md），会话启动时经
+// （data/skills/users/<username>/，本人维护）。每个目录本身是一个
+// 引擎插件包（.claude-plugin/plugin.json + skills/<name>/SKILL.md，
+// 目录/清单文件名是引擎挂载协议要求，属于内部结构），会话启动时经
 // SDK 的 plugins 选项挂载、skills 选项启用——本项目 settingSources 为空
 // （隔离模式），这是唯一的技能注入通道。
 //
@@ -42,7 +43,7 @@ function scopeDir(scope: "user" | "global", username: string): string | null {
   return scope === "global" ? globalDir() : userDir(username);
 }
 
-/** 确保目录具备插件结构（skills/ 与 .claude-plugin/plugin.json 缺失时补齐）。 */
+/** 确保目录具备插件结构（skills/ 与清单文件缺失时补齐）。 */
 function ensurePlugin(dir: string, pluginName: string): void {
   fs.mkdirSync(path.join(dir, "skills"), { recursive: true });
   const manifest = path.join(dir, ".claude-plugin", "plugin.json");

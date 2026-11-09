@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { CreateTaskRequest, TaskFlowRequest, TasksResponse } from "@blm/protocol";
 import type { AgentManager } from "../agent/AgentManager.js";
+import { TaskCreateError } from "../agent/taskManager.js";
 
-// 团队协作流（需求 → 研发 → 测试）：任务线程的创建 / 我的列表 / 流转。
+// 团队协作流（可自定义工作流模板）：任务线程的创建 / 我的列表 / 流转。
 // 鉴权矩阵执法在 TaskManager.flow，这里只做协议校验与错误码映射。
 
 export function registerTaskRoutes(app: FastifyInstance, manager: AgentManager): void {
@@ -10,15 +11,22 @@ export function registerTaskRoutes(app: FastifyInstance, manager: AgentManager):
   app.post("/api/tasks", (req, reply) => {
     const parsed = CreateTaskRequest.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
-    const rec = manager.createTask(req.userId, {
-      title: parsed.data.title.trim(),
-      ...(parsed.data.description ? { description: parsed.data.description } : {}),
-      ...(parsed.data.agent_id ? { agent_id: parsed.data.agent_id } : {}),
-    });
-    return reply.code(201).send(rec);
+    try {
+      const rec = manager.createTask(req.userId, {
+        title: parsed.data.title.trim(),
+        ...(parsed.data.description ? { description: parsed.data.description } : {}),
+        ...(parsed.data.agent_id ? { agent_id: parsed.data.agent_id } : {}),
+        ...(parsed.data.template_name ? { template_name: parsed.data.template_name } : {}),
+        ...(parsed.data.assignees ? { assignees: parsed.data.assignees } : {}),
+      });
+      return reply.code(201).send(rec);
+    } catch (e) {
+      if (e instanceof TaskCreateError) return reply.code(400).send({ error: e.code });
+      throw e;
+    }
   });
 
-  // 我的任务列表（需求方/研发/测试任一角色命中）。
+  // 我的任务列表（需求方/任一环节负责人命中）。
   app.get("/api/tasks", (req) => {
     const body: TasksResponse = { tasks: manager.listTasks(req.userId) };
     return body;
@@ -31,6 +39,7 @@ export function registerTaskRoutes(app: FastifyInstance, manager: AgentManager):
     const result = manager.flowTask(req.userId, (req.params as { id: string }).id, {
       action: parsed.data.action,
       ...(parsed.data.target != null ? { target: parsed.data.target } : {}),
+      ...(parsed.data.stage_key != null ? { stage_key: parsed.data.stage_key } : {}),
       ...(parsed.data.note != null ? { note: parsed.data.note } : {}),
     });
     if (!result.ok) {

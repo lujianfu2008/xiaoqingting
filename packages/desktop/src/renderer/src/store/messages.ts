@@ -2,6 +2,7 @@ import type { ServerMessage } from "@blm/protocol";
 import { normalizeExpr } from "../components/DragonflyLogo";
 import { autoExecIfTrusted } from "./actions/chat";
 import { clearSendAck, clearSendAckByText, pendingAcksForSession } from "./socket";
+import { upsertSchedule } from "./actions/schedules";
 import { t } from "../i18n";
 import type { BlmState, GetState, SetState } from "./types";
 
@@ -188,12 +189,42 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       });
       if (!changed || !me) break;
       const involved =
-        msg.task.requester === me || msg.task.dev === me || msg.task.tester === me;
+        msg.task.requester === me || msg.task.stages.some((s) => s.assignee === me);
       if (!involved) break;
       // 按优先级给出「需要我动作」的提示。走 notice（数秒自动消失）而非
       // error——error 是常驻横幅，任务提示挂在里面会永远粘在所有会话顶部。
-      const toast = toastForTask(msg.task, me);
+      const toast = toastForTask(msg.task, me, prev);
       if (toast) showNotice(set, toast);
+      break;
+    }
+
+    case "schedule_update": {
+      // 定时任务 upsert（推送只发给任务主人本人）。会话首建/重建时服务端
+      // 随帧携带 SessionMeta：自有会话的 session_created 分支只替换不追加，
+      // 这里补足追加，让专属会话即时出现在侧边栏。
+      const prev = get().schedules.find((x) => x.schedule_id === msg.schedule.schedule_id);
+      upsertSchedule(msg.schedule, set);
+      if (msg.session) {
+        set((s) => {
+          const exists = s.sessions.some((x) => x.session_id === msg.session!.session_id);
+          return {
+            sessions: exists
+              ? s.sessions.map((x) =>
+                  x.session_id === msg.session!.session_id ? msg.session! : x,
+                )
+              : [msg.session!, ...s.sessions],
+          };
+        });
+      }
+      // 首次见到或内容变化时轻提示「已触发」；重连播种/重复推送（内容相同）不弹。
+      const changed = !prev || JSON.stringify(prev) !== JSON.stringify(msg.schedule);
+      if (
+        changed &&
+        msg.schedule.last_result === "fired" &&
+        (!prev || prev.last_result !== "fired")
+      ) {
+        showNotice(set, t("sc.firedToast", { name: msg.schedule.name }));
+      }
       break;
     }
 
@@ -248,17 +279,23 @@ function showNotice(set: SetState, text: string): void {
 function toastForTask(
   task: BlmState["tasks"][number],
   me: string,
+  prev?: BlmState["tasks"][number],
 ): string | null {
   const title = task.title;
-  if (task.status === "done") return t("task.doneToast", { title });
-  if (task.status === "fixing" && task.dev === me) {
-    return t("task.issueToast", { title });
+  if (task.status === "done") {
+    return task.cancelled ? t("task.cancelledToast", { title }) : t("task.doneToast", { title });
   }
-  if (task.status === "testing" && task.tester === me) {
-    return t("task.testerToast", { title });
-  }
-  if (task.status === "developing" && task.dev === me) {
-    return t("task.devToast", { title });
+  const cur = task.stages.find((s) => s.key === task.current_stage);
+  if (cur?.assignee === me) return t("task.yourTurnToast", { title, stage: cur.name });
+  // 新被指派（此前我不在任务任何人名下，现在出现在某环节）：提示环节名。
+  if (
+    prev &&
+    prev.requester !== me &&
+    !prev.stages.some((s) => s.assignee === me) &&
+    task.stages.some((s) => s.assignee === me)
+  ) {
+    const mine = task.stages.find((s) => s.assignee === me);
+    if (mine) return t("task.assignedStageToast", { title, stage: mine.name });
   }
   return null;
 }

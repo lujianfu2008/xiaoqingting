@@ -124,7 +124,7 @@ export function registerMcpRoutes(app: FastifyInstance, manager: AgentManager): 
     return reply.code(204).send();
   });
 
-  // 粘贴导入（MCP 市场 / Claude Desktop / Cursor 配置片段）。
+  // 粘贴导入（主流 MCP 客户端/市场的配置片段）。
   app.post("/api/mcp/import", async (req, reply) => {
     const parsed = ImportMcpRequest.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });

@@ -3,12 +3,13 @@ import type { Block, ServerMessage, Usage } from "@blm/protocol";
 import { config } from "../config.js";
 import type { Store, SessionRecord, ProjectRecord } from "../store.js";
 import { isPublicAdmin } from "../users.js";
+import { isPublicExecAuthorized } from "../publicExecAuth.js";
 import { getRole, toPublicRole, type AgentRole } from "./agents.js";
 import { TurnQueue } from "./TurnQueue.js";
 import { buildSessionOptions, type DelegationGate, type PublicSessionCtx } from "./sessionOptions.js";
 import { createPublicRun } from "./publicTools.js";
 import { handleSdkMessage } from "./sdkMessageHandler.js";
-import { LLM_AUTH_ERROR_MESSAGE, isAuthFailureText, isBudgetExhaustedText } from "./sdkText.js";
+import { LLM_AUTH_ERROR_MESSAGE, isAuthFailureText, isBudgetExhaustedText, scrubEngineBranding } from "./sdkText.js";
 import { ClientRequests } from "./clientRequests.js";
 import type { UpdateRequestManager } from "./updateRequests.js";
 
@@ -152,13 +153,15 @@ export class AgentSession {
     if (!this.record.project_id) return undefined;
     const proj = this.store.getProject(this.record.project_id);
     if (!proj || proj.visibility !== "public") return undefined;
+    const withExec = isPublicExecAuthorized(this.record.user_id);
     const run = createPublicRun({
       projectId: proj.project_id,
       projectName: proj.name,
       ownerIsAdmin: isPublicAdmin(this.record.user_id),
+      runCommandAuthorized: withExec,
       submitWrite: (path, content) => this.submitPublicWrite(proj, path, content),
     });
-    return { run, role: toPublicRole(this.role) };
+    return { run, role: toPublicRole(this.role, withExec), withExec };
   }
 
   private async submitPublicWrite(
@@ -238,7 +241,7 @@ export class AgentSession {
             ? `本次会话累计费用已达上限（$${config.maxBudgetUsd}），引擎已停止调用模型。请新开会话继续，或由服务端调大 MAX_BUDGET_USD。`
             : "智能体处理请求时出现内部错误，请稍后重试。",
       });
-      console.error(`[session ${this.record.session_id}] agent loop error:`, raw);
+      console.error(`[session ${this.record.session_id}] agent loop error:`, scrubEngineBranding(raw));
     } finally {
       this.busy = false;
       // 引擎循环已退出（空闲回收/出错/子进程结束）：立即自毁并经 onDispose

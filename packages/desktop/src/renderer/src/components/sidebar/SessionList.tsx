@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import type { Block, ProjectMeta, SessionMeta, TaskStatus, TaskView } from "@blm/protocol";
+import type { Block, ProjectMeta, SessionMeta, TaskView } from "@blm/protocol";
 import { useStore } from "../../store";
 import { apiBase } from "../../store/http";
 import { useT } from "../../i18n";
 import { blocksToMarkdown } from "../../lib/exportMarkdown";
-import { FLOW_STATUS_LABEL } from "../chat/MessageBlock";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 
@@ -158,16 +157,13 @@ const groupHeaderStyle = {
 } as const;
 
 // 协作任务状态徽标配色（与 UpdateRequestsDialog 的状态色一致风格）。
-const TASK_STATUS_COLOR: Record<TaskStatus, string> = {
-  analyzing: "#4aa3ff",
-  developing: "#e5a83a",
-  fixing: "#e5614e",
-  testing: "#a06ae8",
-  done: "#4aa36a",
-};
+// active 按当前环节位置给色，让进行中的任务一眼可辨进度深浅。
+const TASK_COLOR_ACTIVE = "#4aa3ff";
+const TASK_COLOR_DONE = "#4aa36a";
+const TASK_COLOR_CANCELLED = "#8a8a8a";
 
-// 协作任务行：标题 + 我的角色角标 + 状态徽标；done 灰显。点击进线程：
-// 自己是需求方走本人会话，否则走共享只读视图。
+// 协作任务行：标题 + 我的角色角标（需求/我负责的环节名）+ 状态徽标；done
+// （含取消）灰显。点击进线程：自己是需求方走本人会话，否则走共享只读视图。
 function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
   const me = useStore((s) => s.username);
   const currentSessionId = useStore((s) => s.currentSessionId);
@@ -176,14 +172,31 @@ function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
   const t = useT();
   const roles: string[] = [];
   if (task.requester === me) roles.push(t("task.tagRequester"));
-  if (task.dev === me) roles.push(t("task.tagDev"));
-  if (task.tester === me) roles.push(t("task.tagTester"));
+  for (const s of task.stages) {
+    if (s.assignee === me) roles.push(s.name);
+  }
   const mine = task.requester === me;
+  const done = task.status === "done";
+  const cur = task.current_stage ? task.stages.find((s) => s.key === task.current_stage) : null;
+  const statusColor = done
+    ? task.cancelled
+      ? TASK_COLOR_CANCELLED
+      : TASK_COLOR_DONE
+    : TASK_COLOR_ACTIVE;
+  const statusLabel = done
+    ? task.cancelled
+      ? t("task.statusCancelled")
+      : t("task.statusDone")
+    : (cur?.name ?? t("task.statusActive"));
+  const assignees = task.stages
+    .filter((s) => s.assignee)
+    .map((s) => `${s.name}: ${s.assignee}`)
+    .join(" · ");
   return (
     <div
       className={`session-item ${task.session_id === currentSessionId ? "active" : ""}`}
-      style={task.status === "done" ? { opacity: 0.55 } : undefined}
-      title={`${t("task.roleRequester")}: ${task.requester}${task.dev ? ` · ${t("task.roleDev")}: ${task.dev}` : ""}${task.tester ? ` · ${t("task.roleTester")}: ${task.tester}` : ""}`}
+      style={done ? { opacity: 0.55 } : undefined}
+      title={`${t("task.roleRequester")}: ${task.requester}${assignees ? ` · ${assignees}` : ""}`}
       onClick={() => void (mine ? selectSession(task.session_id) : selectSharedSession(task.session_id))}
     >
       <span className="title">{task.title}</span>
@@ -201,9 +214,7 @@ function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
           {roles.join("/")}
         </span>
       )}
-      <span style={{ fontSize: 11, color: TASK_STATUS_COLOR[task.status], whiteSpace: "nowrap" }}>
-        {FLOW_STATUS_LABEL[task.status]}
-      </span>
+      <span style={{ fontSize: 11, color: statusColor, whiteSpace: "nowrap" }}>{statusLabel}</span>
       {!mine && <span className="offline-tip">{task.requester}</span>}
     </div>
   );

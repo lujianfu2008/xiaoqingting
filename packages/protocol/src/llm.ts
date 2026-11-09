@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // ---------- Per-user LLM configuration ----------
 
-// 上游网关的 API 协议：anthropic = Claude 引擎直连（默认）；openai = 服务端
+// 上游网关的 API 协议：anthropic = 引擎直连（默认）；openai = 服务端
 // 翻译层把引擎的 Anthropic 请求转成 OpenAI chat/completions（国内网关多为
 // 这种）。
 export const LlmProtocol = z.enum(["anthropic", "openai"]);

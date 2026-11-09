@@ -48,7 +48,7 @@ export function createTaskActions(
       return task;
     },
 
-    async flowTask(taskId, action, target, note) {
+    async flowTask(taskId, action, opts) {
       const { serverUrl, token } = get();
       try {
         const res = await fetch(`${apiBase(serverUrl)}/api/tasks/${taskId}/flow`, {
@@ -56,8 +56,9 @@ export function createTaskActions(
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({
             action,
-            ...(target ? { target } : {}),
-            ...(note ? { note } : {}),
+            ...(opts?.target ? { target: opts.target } : {}),
+            ...(opts?.stageKey ? { stage_key: opts.stageKey } : {}),
+            ...(opts?.note ? { note: opts.note } : {}),
           }),
         });
         if (!res.ok) {

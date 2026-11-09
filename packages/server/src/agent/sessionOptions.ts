@@ -52,6 +52,8 @@ export interface DelegationGate {
 export interface PublicSessionCtx {
   run: RunAction;
   role: AgentRole;
+  /** 会话主人已授权服务端命令执行（run_command）。 */
+  withExec?: boolean;
 }
 
 /**
@@ -72,7 +74,7 @@ export function buildSessionOptions(
 ): Options {
   const llm = getUserLlmConfig(record.user_id);
   // 公有域会话：工具/提示词换成公域变体；cwd 仍用中立 engine 目录，避免把
-  // 公有工作空间里的文件（可能被投喂）当作 CLAUDE.md 等注入引擎上下文。
+  // 公有工作空间里的文件（可能被投喂）当作项目级说明文件注入引擎上下文。
   const effectiveRole = publicCtx?.role ?? role;
   // 附件读取模式跟模型走：能看图直接回图，否则降级为本机 OCR 文字。
   const attachmentMode: "image" | "ocr" =
@@ -98,6 +100,20 @@ export function buildSessionOptions(
   // 响应头时转成重试/报错，而不是无限等。管不到流中途的停摆——那由
   // AgentSession 的回合看门狗兜底。
   engineEnv.API_TIMEOUT_MS = String(process.env.API_TIMEOUT_MS ?? "180000");
+  // 引擎运行环境隔离：把引擎当独立"住户"对待——
+  // - HOME/TMPDIR 重定向到数据目录内的中性路径：引擎把转录文本、
+  //   后台任务清单、会话环境等运行时数据写进其 HOME 下的品牌目录
+  //   （且会以 <persisted-output> 绝对路径混进发给模型的工具结果，
+  //   间接进入聊天记录），重定向后这些产物全部留在 data/（gitignore
+  //   覆盖），路径也不再含品牌字眼，并与宿主机同名目录互不污染；
+  // - 遥测/错误上报/自动更新全部关闭（这些是服务端
+  //   托管的无人值守进程，既不需要也不该外联）。
+  engineEnv.HOME = config.engineHome;
+  engineEnv.TMPDIR = config.engineTmp;
+  engineEnv.CLAUDE_CONFIG_DIR = config.engineHome;
+  engineEnv.CLAUDE_CODE_DISABLE_TELEMETRY = "1";
+  engineEnv.CLAUDE_CODE_DISABLE_ERROR_REPORTING = "1";
+  engineEnv.CLAUDE_CODE_DISABLE_AUTOUPDATER = "1";
   if (llm) {
     // ANTHROPIC_AUTH_TOKEN wins over ANTHROPIC_API_KEY in the SDK, hence it
     // must be explicitly cleared when using a personal key.

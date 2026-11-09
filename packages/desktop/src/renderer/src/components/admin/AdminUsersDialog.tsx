@@ -18,6 +18,7 @@ export function AdminUsersDialog({
   const listAdminUsers = useStore((s) => s.listAdminUsers);
   const listReviewUsers = useStore((s) => s.listReviewUsers);
   const setUserRole = useStore((s) => s.setUserRole);
+  const setUserPublicExec = useStore((s) => s.setUserPublicExec);
   const setUserDisabled = useStore((s) => s.setUserDisabled);
   const decideReviewUser = useStore((s) => s.decideReviewUser);
   const resetUserPassword = useStore((s) => s.resetUserPassword);
@@ -98,6 +99,8 @@ export function AdminUsersDialog({
       "mcp.global_save": t("au.act.mcpSave"),
       "mcp.global_delete": t("au.act.mcpDelete"),
       "relay.config_save": t("au.act.relaySave"),
+      "workflow.global_save": t("au.act.workflowSave"),
+      "workflow.global_delete": t("au.act.workflowDelete"),
     };
     return map[action] ?? action;
   };
@@ -275,6 +278,11 @@ export function AdminUsersDialog({
                       ★
                     </span>
                   )}
+                  {u.public_exec && (
+                    <span title={t("au.execAuthTip")} style={{ color: "var(--accent, #4aa3ff)" }}>
+                      ⚡
+                    </span>
+                  )}
                 </span>
                 <span style={{ flex: 0.7, display: "flex", alignItems: "center", gap: 4 }}>
                   <span
@@ -375,6 +383,14 @@ export function AdminUsersDialog({
                             }
                           >
                             {u.role === "reviewer" ? t("au.revokeReviewer") : t("au.makeReviewer")}
+                          </button>
+                          <button
+                            style={{ fontSize: 11, padding: "2px 6px" }}
+                            disabled={busy === u.username}
+                            title={t("au.execAuthTip")}
+                            onClick={() => run(u, () => setUserPublicExec(u.username, !u.public_exec))}
+                          >
+                            {u.public_exec ? t("au.revokeExecAuth") : t("au.grantExecAuth")}
                           </button>
                           <button
                             style={{ fontSize: 11, padding: "2px 6px" }}

@@ -1,6 +1,6 @@
 # Xiaoqingting (小蜻蜓) — Your Fully-Local AI Assistant
 
-A local-first AI assistant built on the Claude Agent SDK: **Electron desktop client + Fastify server**. All interactions flow through your own server — voice input, conversations, and tool execution stay on hardware you control.
+A local-first desktop chat agent: **Electron desktop client + Fastify server**. The agent engine runs on the server; file/command/browser operations execute on the user's own machine through a secure bridge. All interactions flow through your own server — voice input, conversations, and tool execution stay on hardware you control.
 
 ```
 ┌─────────────────┐   REST + WebSocket   ┌─────────────────┐
@@ -89,7 +89,7 @@ npm run typecheck   # protocol type checking
 npm run build       # build all packages
 ```
 
-More design notes in [CLAUDE.md](CLAUDE.md).
+More design notes in [AGENTS.md](AGENTS.md).
 
 ## License
 

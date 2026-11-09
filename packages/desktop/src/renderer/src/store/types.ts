@@ -4,6 +4,7 @@ import type {
   AuditEntry,
   Block,
   CreateTaskRequest,
+  CreateScheduleRequest,
   FlowAction,
   ImportMcpResult,
   ImportSkillsResult,
@@ -13,6 +14,7 @@ import type {
   MyRelayStatus,
   RelayConfigInfo,
   RelayConfigUpdate,
+  ScheduleView,
   SkillRegistrySearchResponse,
   McpServerInfo,
   ProjectMeta,
@@ -20,9 +22,12 @@ import type {
   SessionMeta,
   TaskView,
   UpdateRequestView,
+  UpdateScheduleRequest,
+  UpsertWorkflowRequest,
   Usage,
   UserSummary,
   UpdateLlmConfigRequest,
+  WorkflowInfo,
   WsPermissionRequest,
   WsToolExecRequest,
 } from "@blm/protocol";
@@ -117,6 +122,9 @@ export interface BlmState {
   globalMcpServers: McpServerInfo[] | null; // 全局原始列表（仅管理员拉取）
   skills: SkillInfo[] | null; // 生效视图：全局 + 我的（同名覆盖）
   globalSkills: SkillInfo[] | null; // 全局原始列表（仅管理员拉取）
+  workflows: WorkflowInfo[] | null; // 生效视图：内置 + 全局 + 我的（同名覆盖）
+  globalWorkflows: WorkflowInfo[] | null; // 全局原始列表（仅管理员拉取）
+  schedules: ScheduleView[]; // 定时任务（owner 私有；REST 播种 + WS schedule_update）
   myRelay: MyRelayStatus | null; // 网络中继：我的开关 + 管理员总开关 + 桌面在线
   adminRelayConfig: RelayConfigInfo | null; // 网络中继管理页（总开关+白名单+统计）
   browser: BrowserState; // built-in browser surface (embedded pane / popup)
@@ -154,14 +162,20 @@ export interface BlmState {
   loadUpdateRequests(): Promise<void>;
   /** 批准/拒绝一条公有域更新申请（仅管理员）。 */
   decideUpdateRequest(id: string, approve: boolean, reason?: string): Promise<boolean>;
-  // 协作流任务（需求 → 研发 → 测试）。
+  // 协作流任务（可自定义工作流模板）。
   loadTasks(): Promise<void>;
   /** 创建任务线程（同时建绑定会话）；null = 失败。 */
   createTask(input: CreateTaskRequest): Promise<TaskView | null>;
-  /** 推进流转；false = 服务端拒绝（错误已提示）。 */
-  flowTask(taskId: string, action: FlowAction, target?: string, note?: string): Promise<boolean>;
+  /** 推进流转；false = 服务端拒绝（错误已提示）。target = assign 的人，stageKey = send_back/assign 的环节。 */
+  flowTask(
+    taskId: string,
+    action: FlowAction,
+    opts?: { target?: string; stageKey?: string; note?: string },
+  ): Promise<boolean>;
   listAdminUsers(): Promise<AdminUserDetail[]>;
   setUserRole(username: string, role: "admin" | "reviewer" | "user"): Promise<boolean>;
+  /** 授权/撤销某工号在公有域会话的服务端命令执行（仅管理员）。 */
+  setUserPublicExec(username: string, enabled: boolean): Promise<boolean>;
   setUserDisabled(username: string, disabled: boolean): Promise<boolean>;
   /** 待审核注册列表（管理员与审核员）。 */
   listReviewUsers(): Promise<AdminUserDetail[]>;
@@ -216,6 +230,22 @@ export interface BlmState {
   deleteGlobalSkill(name: string): Promise<void>;
   importGlobalSkills(json: string): Promise<ImportSkillsResult>;
   installGlobalSkill(name: string, url: string): Promise<void>;
+  // 工作流模板管理（模板名即主键；失败时抛出已翻译的 Error）。
+  loadWorkflows(): Promise<void>;
+  saveWorkflow(name: string, body: UpsertWorkflowRequest): Promise<void>;
+  deleteWorkflow(name: string): Promise<void>;
+  // 全局模板（仅管理员）。
+  loadGlobalWorkflows(): Promise<void>;
+  saveGlobalWorkflow(name: string, body: UpsertWorkflowRequest): Promise<void>;
+  deleteGlobalWorkflow(name: string): Promise<void>;
+  // 定时任务管理（失败时抛出已翻译的 Error）。
+  loadSchedules(): Promise<void>;
+  createSchedule(input: CreateScheduleRequest): Promise<ScheduleView>;
+  updateSchedule(id: string, input: UpdateScheduleRequest): Promise<void>;
+  setScheduleEnabled(id: string, enabled: boolean): Promise<void>;
+  /** 立即执行一轮；返回最新记录（被跳过时 last_skip_reason 有值，由面板提示）。 */
+  triggerSchedule(id: string): Promise<ScheduleView>;
+  deleteSchedule(id: string): Promise<void>;
   deleteSession(id: string): Promise<void>;
   moveSession(id: string, projectId: string | null): Promise<void>;
   /** 重命名自己的会话（空标题不提交；仅自己的会话可改）。 */
@@ -266,17 +296,12 @@ export const TRUSTABLE_ACTIONS = new Set([
 
 /**
  * 协作流任务的当前负责人（工作台跟随指派）：agent 的本机执行、审批应答、
- * 发言守卫都跟随此用户。与服务端 TaskManager.executorOf 同一规则；无任务
+ * 发言守卫都跟随此用户。与服务端 TaskManager.executorOf 同一规则（两边必须
+ * 同步改）：当前环节负责人兜底需求方（环节未指派）；已完结回需求方。无任务
  * 的会话调用方回退会话主人。
  */
 export function executorOfTask(task: TaskView): string {
-  switch (task.status) {
-    case "developing":
-    case "fixing":
-      return task.dev ?? task.requester;
-    case "testing":
-      return task.tester ?? task.dev ?? task.requester;
-    default: // analyzing / done
-      return task.requester;
-  }
+  if (task.status !== "active" || !task.current_stage) return task.requester;
+  const cur = task.stages.find((s) => s.key === task.current_stage);
+  return cur?.assignee ?? task.requester;
 }

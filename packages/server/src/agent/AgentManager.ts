@@ -111,6 +111,11 @@ export class AgentManager {
     return this.registry.listSessions(userId);
   }
 
+  /** 某会话引擎当前是否在跑（未建/已空闲回收 = false）。定时调度避让用。 */
+  isSessionBusy(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.isBusy ?? false;
+  }
+
   // ---------- projects ----------
 
   createProject(
@@ -218,6 +223,11 @@ export class AgentManager {
   /** WS 连接建立补推：未完结任务。 */
   activeTasksFor(userId: string): TaskRecord[] {
     return this.tasks.activeFor(userId);
+  }
+
+  /** 存量任务迁移到 v2（启动时调用一次，先于一切 REST/WS 入口）。 */
+  migrateLegacyTasks(): void {
+    this.tasks.migrateLegacyTasks();
   }
 
   // ---------- 公有域更新申请 ----------

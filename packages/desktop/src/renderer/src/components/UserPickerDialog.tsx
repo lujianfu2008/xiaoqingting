@@ -4,20 +4,23 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { Overlay } from "./Overlay";
 
-// 单选用户选择器（协作流指派研发/测试）：复制 ShareDialog 的用户列表模式
+// 单选用户选择器（协作流环节指派等）：复制 ShareDialog 的用户列表模式
 // （listUsers + 状态点），不重构 ShareDialog。
 export function UserPickerDialog({
   title,
   optionalSkip,
   exclude = [],
+  includeSelf = false,
   onPick,
   onClose,
 }: {
   title: string;
-  /** 提供时显示「跳过」按钮（如 submit_test 可不指定测试）。 */
+  /** 提供时显示「跳过」按钮（如推进时暂不指派下一环节）。 */
   optionalSkip?: string;
   /** 不出现在候选里的用户名（如已被指派的人）。 */
   exclude?: string[];
+  /** 环节负责人可以是自己（需求方自任负责人推进），默认仍过滤自己。 */
+  includeSelf?: boolean;
   onPick: (username: string | null) => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -29,11 +32,15 @@ export function UserPickerDialog({
   useEffect(() => {
     void listUsers().then((all) =>
       setUsers(
-        all.filter((u) => u.username !== username && !exclude.includes(u.username)),
+        all.filter(
+          (u) =>
+            (includeSelf || u.username !== username) &&
+            !exclude.includes(u.username),
+        ),
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listUsers, username]);
+  }, [listUsers, username, includeSelf]);
 
   return (
     <Overlay onClose={onClose}>

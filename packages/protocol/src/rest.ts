@@ -124,6 +124,8 @@ export const AdminUserDetail = z.object({
   online: z.boolean().optional(),
   // 内置（bootstrap）管理员：不可降级/禁用，客户端据此隐藏操作。
   immutable: z.boolean().optional(),
+  // 是否已授权在公有域会话执行服务端命令（run_command）。
+  public_exec: z.boolean().optional(),
 });
 export type AdminUserDetail = z.infer<typeof AdminUserDetail>;
 
@@ -137,6 +139,10 @@ export type RoleUpdateRequest = z.infer<typeof RoleUpdateRequest>;
 
 export const DisabledUpdateRequest = z.object({ disabled: z.boolean() });
 export type DisabledUpdateRequest = z.infer<typeof DisabledUpdateRequest>;
+
+// 公有域服务端执行授权开关（仅管理员）。
+export const PublicExecToggleRequest = z.object({ enabled: z.boolean() });
+export type PublicExecToggleRequest = z.infer<typeof PublicExecToggleRequest>;
 
 // ---------- 注册审核（管理员 + 其授权的审核员） ----------
 
@@ -178,6 +184,11 @@ export const AUDIT_ACTIONS = [
   "skills.global_delete",
   // 客户端出口中继配置变更（管理员）。
   "relay.config_save",
+  // 全局工作流模板变更（管理员）。
+  "workflow.global_save",
+  "workflow.global_delete",
+  // 公有域服务端执行授权变更（管理员）。
+  "public.exec_auth_change",
 ] as const;
 
 export const AuditEntry = z.object({

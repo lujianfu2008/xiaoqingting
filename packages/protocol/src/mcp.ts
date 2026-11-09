@@ -8,7 +8,7 @@ import { z } from "zod";
 export const McpTransport = z.enum(["stdio", "http", "sse"]);
 export type McpTransport = z.infer<typeof McpTransport>;
 
-// 单个服务器定义。字段与 SDK 及 Claude Desktop / Cursor 的 mcpServers 配置
+// 单个服务器定义。字段与 SDK 及主流 MCP 客户端的 mcpServers 配置
 // 同构，因此市场页面复制的 JSON 片段可直接粘贴导入。enabled=false 表示
 // 保留配置但暂不启用（用户同名配置可覆盖/屏蔽全局同名服务器）。
 export const McpServerDef = z.object({
@@ -54,7 +54,7 @@ export type McpServerInfo = z.infer<typeof McpServerInfo>;
 export const McpServersResponse = z.object({ servers: z.array(McpServerInfo) });
 export type McpServersResponse = z.infer<typeof McpServersResponse>;
 
-// 粘贴导入：接受 {"mcpServers":{...}}（Claude Desktop / Cursor / 多数 MCP
+// 粘贴导入：接受 {"mcpServers":{...}}（多数 MCP
 // 市场给出的格式）或裸的 {名称: 定义} 映射。scope=global 仅管理员可用，
 // 允许导入 stdio；用户级导入只接受远程服务器。
 export const ImportMcpRequest = z.object({

@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { getUserLlmConfig } from "./llmConfig.js";
 import { relayProxyFor, relayIngressPort } from "./relay/llmBridge.js";
 
-// OpenAI 协议适配层：把 Claude 引擎的 Anthropic Messages 请求翻译成
+// OpenAI 协议适配层：把引擎的 Anthropic Messages 请求翻译成
 // OpenAI chat/completions（国内网关大多只说 OpenAI 协议）。
 //
 // 链路：引擎 → 本翻译端口 /t/<user>/s/<session>/v1/messages → (共享中继入口 ‖
@@ -588,7 +588,7 @@ export function startOpenAiCompatServer(): Promise<void> {
 
 async function handleCompatRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // 只回答 POST /t/<user>[/s/<session>]/v1/messages[/count_tokens]，其余一律
-  // Anthropic 404。引擎（Claude CLI）实际请求带查询参数（v1/messages?beta=true）
+  // Anthropic 404。引擎 CLI 实际请求带查询参数（v1/messages?beta=true）
   // ——路由前必须剥掉。session 可缺省（老会话的 base_url 没有它）：
   // 缺省时代发人解析退化为「只用会话主人」。
   const path = (req.url ?? "").split("?")[0];

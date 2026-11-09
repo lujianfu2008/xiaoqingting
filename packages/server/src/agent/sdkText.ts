@@ -52,3 +52,16 @@ export const LLM_AUTH_ERROR_MESSAGE =
 export function isBudgetExhaustedText(text: string): boolean {
   return /maximum budget|max.?budget/i.test(text);
 }
+
+/**
+ * 服务端日志用：把引擎抛出的错误文本里的品牌词（产品底座名）替换为
+ * 中性词，避免引擎报错原文（含品牌名）落进服务日志。仅影响日志，
+ * 客户端看到的仍是固定中文文案。
+ */
+export function scrubEngineBranding(text: string): string {
+  return text
+    .replace(/Claude Code/g, "引擎")
+    .replace(/\bClaude\b/g, "引擎")
+    .replace(/claude-agent-sdk/g, "agent-sdk")
+    .replace(/claude/gi, "engine");
+}

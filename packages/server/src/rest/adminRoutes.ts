@@ -5,6 +5,7 @@ import {
   AdminUsersResponse,
   AdminResetPasswordRequest,
   DisabledUpdateRequest,
+  PublicExecToggleRequest,
   ReviewDecisionRequest,
   RoleUpdateRequest,
 } from "@blm/protocol";
@@ -23,6 +24,7 @@ import {
   setStatus,
   resetPassword,
 } from "../users.js";
+import { isPublicExecAuthorized, setPublicExecAuthorized } from "../publicExecAuth.js";
 
 // 管理员专用：用户管理（公有域管理员授权、审核员授权、账号禁用/启用）。
 // 注册审核端点（/api/review/*）对管理员和管理员授权的审核员（reviewer）开放。
@@ -40,6 +42,7 @@ export function registerAdminRoutes(app: FastifyInstance, manager: AgentManager)
       created_at: rec?.created_at,
       online: manager.isOnline(u.username),
       immutable: isBootstrapAdmin(u.username),
+      public_exec: isPublicExecAuthorized(u.username),
     };
   };
 
@@ -89,6 +92,26 @@ export function registerAdminRoutes(app: FastifyInstance, manager: AgentManager)
       target: username,
     });
     return { username, disabled: parsed.data.disabled };
+  });
+
+  // 公有域服务端执行授权：被授权工号可在公有域会话里用 run_command
+  // 在服务器工作空间内执行命令。变更后丢弃该用户空闲会话，下一条
+  // 消息按新工具集重建。bootstrap admin 天然授权，无需开关。
+  app.post("/api/admin/users/:username/public-exec", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const parsed = PublicExecToggleRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const username = (req.params as { username: string }).username;
+    if (!getUserRecord(username)) return reply.code(404).send({ error: "not_found" });
+    setPublicExecAuthorized(username, parsed.data.enabled);
+    appendAudit({
+      actor: req.userId,
+      action: "public.exec_auth_change",
+      target: username,
+      detail: { enabled: parsed.data.enabled },
+    });
+    manager.disposeIdleSessions(username);
+    return { username, public_exec: parsed.data.enabled };
   });
 
   // 重置密码（无需旧密码）。目标用户的所有旧 token 立即失效并被强制下线。

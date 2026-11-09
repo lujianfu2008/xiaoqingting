@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 // Load .env from the server package dir (does not override already-set vars).
-// Covers both app config and SDK-required ANTHROPIC_* / CLAUDE_CODE_* vars.
+// Covers both app config and SDK-required ANTHROPIC_* env vars.
 (function loadDotEnv(): void {
   const file = path.resolve(import.meta.dirname, "../.env");
   try {
@@ -34,6 +34,13 @@ export const config = {
   ),
   dataDir: path.resolve(env("DATA_DIR", "./data")),
   engineCwd: path.join(path.resolve(env("DATA_DIR", "./data")), "engine"),
+  // 引擎私有"家目录"：引擎把转录、任务清单、会话环境等运行时数据
+  // 写进其 HOME 下的品牌目录（转录还会以 <persisted-output> 路径
+  // 形式混进聊天内容）。把 HOME 重定向到数据目录内的一处中性路径，
+  // 引擎产物全部留在 data/（已被 .gitignore 覆盖），路径不再暴露
+  // 品牌名，也不与宿主机的同名目录互相污染。
+  engineHome: path.join(path.resolve(env("DATA_DIR", "./data")), "engine-home"),
+  engineTmp: path.join(path.resolve(env("DATA_DIR", "./data")), "engine-tmp"),
   permissionTimeoutMs: Number(env("PERMISSION_TIMEOUT_MS", "300000")),
   sessionIdleMs: Number(env("SESSION_IDLE_MS", "600000")),
   // 回合看门狗：回合内连续这么久没有任何 SDK 消息（模型 API 挂死/子进程失联）
@@ -73,4 +80,7 @@ export function ensureDataDirs(): void {
   // Neutral engine working dir: the SDK injects its cwd into the model's
   // context, so it must not point at user-specific workspace paths.
   fs.mkdirSync(path.join(config.dataDir, "engine"), { recursive: true });
+  // 引擎私有家目录/临时目录（engineHome/engineTmp 的落点）。
+  fs.mkdirSync(config.engineHome, { recursive: true });
+  fs.mkdirSync(config.engineTmp, { recursive: true });
 }

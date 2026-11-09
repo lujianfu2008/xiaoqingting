@@ -3,6 +3,7 @@ import { Block } from "./blocks.js";
 import { SessionMeta, Usage } from "./sessions.js";
 import { UpdateRequestView } from "./public.js";
 import { TaskView } from "./tasks.js";
+import { WsScheduleUpdate } from "./schedules.js";
 
 // ---------- Server -> Client (WebSocket) ----------
 
@@ -117,6 +118,9 @@ export const WsTaskUpdate = z.object({
 });
 export type WsTaskUpdate = z.infer<typeof WsTaskUpdate>;
 
+// 定时任务变更（定义在 schedules.js，经 index.ts 桶导出）：推给任务主人，
+// 连接建立后靠 REST 播种收敛，与 task_update 同构。
+
 export const ServerMessage = z.discriminatedUnion("type", [
   WsMessageDelta,
   WsMessageBlock,
@@ -131,5 +135,6 @@ export const ServerMessage = z.discriminatedUnion("type", [
   WsUpdateRequestDecided,
   WsReviewRequest,
   WsTaskUpdate,
+  WsScheduleUpdate,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;

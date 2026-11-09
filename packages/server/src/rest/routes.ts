@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AgentManager } from "../agent/AgentManager.js";
 import type { Store } from "../store.js";
+import type { ScheduleScheduler } from "../scheduler.js";
 import { registerAuthRoutes } from "./authRoutes.js";
 import { registerSessionRoutes } from "./sessionRoutes.js";
 import { registerAdminRoutes } from "./adminRoutes.js";
@@ -10,6 +11,8 @@ import { registerLlmRoutes } from "./llmRoutes.js";
 import { registerAsrRoutes } from "./asrRoutes.js";
 import { registerMcpRoutes } from "./mcpRoutes.js";
 import { registerSkillRoutes } from "./skillRoutes.js";
+import { registerWorkflowRoutes } from "./workflowRoutes.js";
+import { registerScheduleRoutes } from "./scheduleRoutes.js";
 import { registerRelayRoutes } from "./relayRoutes.js";
 
 // Composes the REST surface. Auth goes first because it also installs the JWT
@@ -19,6 +22,7 @@ export function registerRoutes(
   app: FastifyInstance,
   manager: AgentManager,
   store: Store,
+  scheduler: ScheduleScheduler,
 ): void {
   void store; // kept for the existing call signature in index.ts
   registerAuthRoutes(app, manager);
@@ -30,6 +34,8 @@ export function registerRoutes(
   registerAsrRoutes(app);
   registerMcpRoutes(app, manager);
   registerSkillRoutes(app, manager);
+  registerWorkflowRoutes(app, manager);
+  registerScheduleRoutes(app, manager, scheduler);
   registerRelayRoutes(app, manager);
 }
 

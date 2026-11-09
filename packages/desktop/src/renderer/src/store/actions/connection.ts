@@ -95,6 +95,8 @@ export function createConnectionActions(
         void get().loadProjects().catch(() => undefined);
         // 协作流任务：REST 播种（WS 补推与其幂等）。
         void get().loadTasks().catch(() => undefined);
+        // 定时任务：REST 播种（schedule_update 推送与其幂等）。
+        void get().loadSchedules().catch(() => undefined);
         // Initial identity/presence snapshot; the WS `presence` events keep it fresh.
         void get().loadMe();
         void get().loadShared().then(() => {
