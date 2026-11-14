@@ -1,5 +1,5 @@
 import type { AttachmentImage, ServerMessage, UpdateRequestStatus, UpdateRequestView } from "@blm/protocol";
-import { Store, type SessionRecord, type TaskRecord } from "../store.js";
+import { Store, sharedWithUser, type ProjectRecord, type SessionRecord, type TaskRecord } from "../store.js";
 import { AgentSession } from "./AgentSession.js";
 import { ConnectionRegistry } from "./connections.js";
 import { MessageRouter } from "./messageRouter.js";
@@ -28,10 +28,10 @@ export class AgentManager {
     this.registry = new SessionRegistry(store);
     this.updateRequests = new UpdateRequestManager(store, this.conns);
     this.tasks = new TaskManager(store, this.conns, this.registry);
-    // 工作台跟随指派：本机执行/审批的目标由任务当前负责人决定；无任务的共享
-    // 会话跟随最近发言人（谁驱动会话就在谁机器上执行），再回退主人（晚绑定防循环构造）。
-    this.conns.execTargetResolver = (sid) =>
-      this.tasks.executorOf(sid) ?? this.router.lastSpeakerOf(sid);
+    // 工作台跟随指派：本机执行/审批的目标由任务当前负责人决定；共享会话
+    // 一律钉死会话主人（使用方只是借用宿主的能力与信息，不能把操作引到
+    // 自己机器上）。
+    this.conns.execTargetResolver = (sid) => this.tasks.executorOf(sid);
     this.router = new MessageRouter(store, this.conns, this.sessions, this.updateRequests, this.tasks);
   }
 
@@ -96,6 +96,17 @@ export class AgentManager {
     }
   }
 
+  /** 项目元数据（描述）变更后调用：丢弃该项目下所有用户的空闲
+   *  会话，下一条消息按新描述重建（描述影响项目的全部会话，不只
+   *  是编辑者自己的）。忙会话不打断，自然空闲后生效。 */
+  disposeProjectIdleSessions(projectId: string): void {
+    for (const [sessionId, session] of this.sessions) {
+      if (session.record.project_id !== projectId || session.isBusy) continue;
+      session.dispose();
+      this.sessions.delete(sessionId);
+    }
+  }
+
   // ---------- sessions ----------
 
   createSession(
@@ -116,6 +127,21 @@ export class AgentManager {
     return this.sessions.get(sessionId)?.isBusy ?? false;
   }
 
+  /** WS 连接建立补推：该用户可见（自有或共享可见）且引擎在跑的
+   *  会话忙闲状态。共享会话由别人驱动时，协作者重连后也能看到忙碌。 */
+  busyTurnStatesFor(userId: string): ServerMessage[] {
+    const out: ServerMessage[] = [];
+    for (const [sessionId, session] of this.sessions) {
+      if (!session.isBusy) continue;
+      const rec = this.store.getSession(sessionId);
+      if (!rec) continue;
+      if (rec.user_id === userId || (rec.shared && sharedWithUser(rec, userId))) {
+        out.push({ type: "turn_state", session_id: sessionId, busy: true });
+      }
+    }
+    return out;
+  }
+
   // ---------- projects ----------
 
   createProject(
@@ -123,8 +149,27 @@ export class AgentManager {
     name: string,
     agentId: string,
     visibility: "personal" | "public" = "personal",
+    description?: string,
   ) {
-    return this.registry.createProject(userId, name, agentId, visibility);
+    return this.registry.createProject(userId, name, agentId, visibility, description);
+  }
+
+  /** 设置项目描述（个人项目=本人；公有域项目=公有域管理员）。
+   *  与 deleteProject 同一归属模型：非归属者 403。 */
+  setProjectDescription(
+    userId: string,
+    projectId: string,
+    description: string,
+  ): { ok: true; rec: ProjectRecord } | { ok: false; code: "not_found" | "forbidden" } {
+    const proj = this.store.getProject(projectId);
+    if (!proj) return { ok: false, code: "not_found" };
+    if (!this.registry.canManageProject(userId, proj)) return { ok: false, code: "forbidden" };
+    if ((proj.description ?? "") === description) return { ok: true, rec: proj };
+    const rec = this.store.updateProjectDescription(projectId, description);
+    if (!rec) return { ok: false, code: "not_found" };
+    // 描述随会话注入提示词：回收空闲会话，下一条消息按新描述重建。
+    this.disposeProjectIdleSessions(projectId);
+    return { ok: true, rec };
   }
 
   listProjects(userId: string) {
@@ -164,19 +209,16 @@ export class AgentManager {
   deleteSession(
     userId: string,
     sessionId: string,
-  ): { ok: true } | { ok: false; code: "not_found" | "task_active" } {
+  ): { ok: true } | { ok: false; code: "not_found" } {
     // Stop the live engine first so it cannot append to a record being removed.
     if (!this.registry.isOwner(userId, sessionId)) return { ok: false, code: "not_found" };
-    // 协作流任务线程守卫：任务未完结时，删除即取消（仅需求方——会话主人就是
-    // 任务需求方，删线程=放弃任务，流转守卫在 TaskManager.flow）；非需求方
-    // 过不了 isOwner 到不了这里。done 后直接删，任务记录保留（客户端列表降级灰显）。
+    // 协作任务线程：删除=放弃任务（会话主人就是任务需求方，非需求方
+    // 过不了 isOwner）。发起方随时可删——在途任务强制收尾为取消并推
+    // task_update（不走 flow 守卫，卡住的任务也删得掉）；done 后直接
+    // 删，任务记录保留（客户端列表降级灰显）。
     const rec = this.store.getSession(sessionId);
     if (rec?.task_id) {
-      const task = this.tasks.getTask(rec.task_id);
-      if (task && task.status !== "done") {
-        const cancelled = this.tasks.flow(userId, task.task_id, { action: "cancel" });
-        if (!cancelled.ok) return { ok: false, code: "task_active" };
-      }
+      this.tasks.forceFinish(rec.task_id);
     }
     this.sessions.get(sessionId)?.dispose();
     this.sessions.delete(sessionId);
@@ -220,6 +262,14 @@ export class AgentManager {
     return this.tasks.listFor(userId);
   }
 
+  /** 删除已完结任务记录（需求方；幽灵灰显条目清理）。 */
+  deleteTask(
+    userId: string,
+    taskId: string,
+  ): "ok" | "not_found" | "forbidden" | "bad_status" {
+    return this.tasks.deleteTask(userId, taskId);
+  }
+
   /** WS 连接建立补推：未完结任务。 */
   activeTasksFor(userId: string): TaskRecord[] {
     return this.tasks.activeFor(userId);
@@ -261,6 +311,10 @@ export class AgentManager {
 
   handleInterrupt(userId: string, sessionId: string): void {
     this.router.handleInterrupt(userId, sessionId);
+  }
+
+  handleRegenerate(userId: string, sessionId: string): void {
+    this.router.handleRegenerate(userId, sessionId);
   }
 
   handlePermissionResponse(userId: string, requestId: string, allow: boolean): void {

@@ -56,5 +56,7 @@ export const ProjectMeta = z.object({
   visibility: z.enum(["personal", "public"]).optional(),
   // 公有域项目必有：创建者（管理员）用户名；个人项目即创建者本人。
   owner: z.string().optional(),
+  // 空间说明（可选）：这个工作空间是干什么的；随会话注入智能体上下文。
+  description: z.string().optional(),
 });
 export type ProjectMeta = z.infer<typeof ProjectMeta>;

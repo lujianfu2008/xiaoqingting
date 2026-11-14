@@ -92,8 +92,16 @@ export const CreateProjectRequest = z.object({
   agent_id: z.string().optional(),
   // "public" = 公有域项目（文件存服务端工作空间），仅公有域管理员可创建。
   visibility: z.enum(["personal", "public"]).optional(),
+  // 空间说明（可选）：随会话注入智能体上下文。
+  description: z.string().trim().max(500).optional(),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
+
+// REST: update a project space's description (owner only; empty = clear).
+export const SetProjectDescriptionRequest = z.object({
+  description: z.string().trim().max(500),
+});
+export type SetProjectDescriptionRequest = z.infer<typeof SetProjectDescriptionRequest>;
 
 // REST: toggle sharing of one of my sessions (owner only).
 export const ShareSessionRequest = z.object({
@@ -109,6 +117,41 @@ export const SessionHistory = z.object({
   blocks: z.array(Block),
 });
 export type SessionHistory = z.infer<typeof SessionHistory>;
+
+// ---------- 会话内容搜索（GET /api/sessions/search） ----------
+
+// q 至少 1 字符（中文 1 字即搜，英文也放行——门槛由客户端防抖兜底）；
+// limit = 最多返回的会话数。
+export const SessionSearchQuery = z.object({
+  q: z.string().trim().min(1).max(100),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+export type SessionSearchQuery = z.infer<typeof SessionSearchQuery>;
+
+// 单条命中：block_index = 块在会话历史里的下标（与 /messages 返回的
+// blocks 数组对齐）；snippet 由服务端截好（命中词前后各 ~60 字），
+// 命中词以 ** 包裹供客户端高亮；块历史不落时间戳，created_at 以
+// 会话最近更新时间作参考。
+export const SessionSearchMatch = z.object({
+  block_index: z.number().int().nonnegative(),
+  snippet: z.string(),
+  created_at: z.string(),
+});
+export type SessionSearchMatch = z.infer<typeof SessionSearchMatch>;
+
+export const SessionSearchItem = z.object({
+  session_id: z.string(),
+  session_title: z.string(),
+  project_id: z.string().nullable(),
+  // 每会话最多展示 3 条命中。
+  matches: z.array(SessionSearchMatch).max(3),
+  // 该会话命中块总数（未截断）。
+  total: z.number().int().nonnegative(),
+});
+export type SessionSearchItem = z.infer<typeof SessionSearchItem>;
+
+export const SessionSearchResponse = z.array(SessionSearchItem);
+export type SessionSearchResponse = z.infer<typeof SessionSearchResponse>;
 
 // ---------- 管理员：用户管理（仅公有域管理员可调用） ----------
 

@@ -9,7 +9,6 @@ const ACTION_KEYS: Record<WsToolExecRequest["action"], Key> = {
   write_file: "exec.write_file",
   list_dir: "exec.list_dir",
   get_workdir: "exec.get_workdir",
-  choose_workdir: "exec.choose_workdir",
   browser_open: "exec.browser_open",
   browser_navigate: "exec.browser_navigate",
   browser_snapshot: "exec.browser_snapshot",

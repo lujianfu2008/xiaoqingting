@@ -2,7 +2,10 @@ import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { attachmentResult, CMD_TIMEOUT_MS, FILE_TIMEOUT_MS, textResult, type RunAction } from "./shared.js";
 
-// Client tools that read/write files, run commands, or manage the work dir.
+// Client tools that read/write files or run commands on the user's
+// machine. Work-dir/space settings are deliberately NOT agent tools:
+// changing them (work dir, project folder, access scope) is a
+// user-only action done in the settings UI, never via conversation.
 
 export function fileTools(run: RunAction, attachmentMode: "image" | "ocr") {
   const runCommand = tool(
@@ -43,13 +46,6 @@ export function fileTools(run: RunAction, attachmentMode: "image" | "ocr") {
     async () => textResult(await run("get_workdir", {}, FILE_TIMEOUT_MS)),
   );
 
-  const chooseWorkdir = tool(
-    "choose_workdir",
-    "请用户在电脑上重新选择（或更改）智能体的工作目录，会弹出目录选择窗口。仅当用户明确要求更改工作目录时才可调用；文件或目录找不到、路径不对时绝不要调用（先向用户说明情况），更不要反复重试",
-    {},
-    async () => textResult(await run("choose_workdir", {}, FILE_TIMEOUT_MS)),
-  );
-
   // Image/text viewer for the user's machine. Scoped hard to steer the model
   // away from read_file-on-binary flailing: any image (message attachments
   // AND workdir files) must go through here. The read mode is fixed
@@ -62,5 +58,5 @@ export function fileTools(run: RunAction, attachmentMode: "image" | "ocr") {
     async (args) => attachmentResult(await run("read_attachment", { path: args.path, mode: attachmentMode }, FILE_TIMEOUT_MS)),
   );
 
-  return [runCommand, readFile, writeFile, listDir, getWorkdir, chooseWorkdir, readAttachment];
+  return [runCommand, readFile, writeFile, listDir, getWorkdir, readAttachment];
 }

@@ -10,6 +10,7 @@ export function createVoiceActions(
 ): Pick<
   BlmState,
   | "setAutoRead"
+  | "setNotifyEnabled"
   | "updateVoiceSettings"
   | "setWakeError"
   | "setContinuousVoice"
@@ -27,6 +28,11 @@ export function createVoiceActions(
         stopAudio();
         set({ speaking: false });
       }
+    },
+
+    setNotifyEnabled(on) {
+      set({ notifyEnabled: on });
+      localStorage.setItem(LS.notifyEnabled, on ? "1" : "0");
     },
 
     updateVoiceSettings(patch) {

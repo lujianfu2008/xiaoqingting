@@ -67,7 +67,7 @@ export function AdminRelayPanel(): React.JSX.Element {
                 })
               : t("relay.statsNone")}
           </div>
-          {stats.last_error && <div style={{ color: "#e56" }}>{stats.last_error}</div>}
+          {stats.last_error && <div style={{ color: "var(--danger)" }}>{stats.last_error}</div>}
         </div>
       )}
 

@@ -9,7 +9,7 @@ import { apiBase } from "../http";
 export function createProjectActions(
   set: SetState,
   get: GetState,
-): Pick<BlmState, "loadProjects" | "createProject" | "deleteProject"> {
+): Pick<BlmState, "loadProjects" | "createProject" | "deleteProject" | "updateProjectDescription"> {
   return {
     async loadProjects() {
       const { serverUrl, token } = get();
@@ -26,7 +26,7 @@ export function createProjectActions(
       }
     },
 
-    async createProject({ name, agentId, folder, visibility = "personal" }) {
+    async createProject({ name, description, agentId, folder, visibility = "personal" }) {
       const { serverUrl, token } = get();
       try {
         const res = await fetch(`${apiBase(serverUrl)}/api/projects`, {
@@ -35,6 +35,7 @@ export function createProjectActions(
           body: JSON.stringify({
             name,
             agent_id: agentId,
+            ...(description?.trim() ? { description: description.trim() } : {}),
             ...(visibility === "public" ? { visibility } : {}),
           }),
         });
@@ -71,6 +72,28 @@ export function createProjectActions(
         projects: s.projects.filter((p) => p.project_id !== id),
         sessions: s.sessions.map((x) => (x.project_id === id ? { ...x, project_id: null } : x)),
       }));
+    },
+
+    /** 设置项目描述（个人=本人；公域=管理员）；空串 = 清空。 */
+    async updateProjectDescription(id, description) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/projects/${id}/description`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ description }),
+        });
+        if (!res.ok) return false;
+        const rec = (await res.json()) as { description?: string };
+        set((s) => ({
+          projects: s.projects.map((p) =>
+            p.project_id === id ? { ...p, description: rec.description || undefined } : p,
+          ),
+        }));
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

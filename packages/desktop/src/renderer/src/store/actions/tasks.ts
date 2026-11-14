@@ -18,7 +18,7 @@ export function upsertTask(task: TaskView, set: SetState): void {
 export function createTaskActions(
   set: SetState,
   get: GetState,
-): Pick<BlmState, "loadTasks" | "createTask" | "flowTask"> {
+): Pick<BlmState, "loadTasks" | "createTask" | "flowTask" | "deleteTask"> {
   return {
     async loadTasks() {
       const { serverUrl, token } = get();
@@ -32,6 +32,24 @@ export function createTaskActions(
         set({ tasks: data.tasks });
       } catch {
         // offline — keep the last list
+      }
+    },
+
+    async deleteTask(taskId) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/tasks/${taskId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { message?: string };
+          set({ error: body.message ?? t("task.deleteFail") });
+          return;
+        }
+        set((s) => ({ tasks: s.tasks.filter((x) => x.task_id !== taskId) }));
+      } catch {
+        set({ error: t("task.deleteFail") });
       }
     },
 

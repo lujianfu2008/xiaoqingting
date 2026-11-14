@@ -1,7 +1,8 @@
 import type { ServerMessage } from "@blm/protocol";
 import { normalizeExpr } from "../components/DragonflyLogo";
 import { autoExecIfTrusted } from "./actions/chat";
-import { clearSendAck, clearSendAckByText, pendingAcksForSession } from "./socket";
+import { clearSendAck, clearSendAckByText, pendingAcksForSession, sendExecResult } from "./socket";
+import { armTurn, finishTurn, notifyConfirmNeeded } from "./notify";
 import { upsertSchedule } from "./actions/schedules";
 import { t } from "../i18n";
 import type { BlmState, GetState, SetState } from "./types";
@@ -24,6 +25,8 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       if (msg.block.kind === "user_text") {
         if (msg.block.client_msg_id) clearSendAck(msg.block.client_msg_id);
         else clearSendAckByText(msg.session_id, msg.block.text);
+        // 记回合开始（后台完成通知用；已在记的回合不重复记）。
+        armTurn(msg.session_id);
       }
       set((s) => ({
         blocksBySession: {
@@ -49,9 +52,21 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
     case "permission_request":
       // 并发审批：追加进队列（弹窗渲染队首，逐个应答）。
       set((s) => ({ pendingPermission: [...s.pendingPermission, msg] }));
+      // 失焦时系统通知提醒（前台正看着就不打扰）。
+      notifyConfirmNeeded(msg.session_id, get);
       break;
 
     case "tool_exec_request": {
+      // 工作目录/空间设置只能用户在界面里改：任何经对话进来的
+      // 改目录请求一律拒绝回执，绝不转发主进程。运行时字符串
+      // 比较（帧未经 schema 校验，旧服务端帧兜底）。
+      if ((msg.action as string) === "choose_workdir") {
+        sendExecResult(msg.request_id, {
+          ok: false,
+          error: t("err.workdirUiOnly"),
+        });
+        break;
+      }
       const handled = autoExecIfTrusted(
         {
           request_id: msg.request_id,
@@ -64,7 +79,11 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
         },
         get().trustMode,
       );
-      if (!handled) set((s) => ({ pendingExec: [...s.pendingExec, msg] }));
+      if (!handled) {
+        set((s) => ({ pendingExec: [...s.pendingExec, msg] }));
+        // 失焦时系统通知提醒（信任模式自动执行的请求不弹）。
+        notifyConfirmNeeded(msg.session_id, get);
+      }
       break;
     }
 
@@ -72,11 +91,12 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       // 引擎命令队列里还有用户消息（回合中补充的内容没被本回合并入）时还会
       // 继续出结果：保持 busy，输入框不切回「发送」（否则用户以为已空闲）。
       // 本机还有消息在等送达确认时同理（服务端还没接手，不能解锁）。
+      const keepBusy =
+        (msg.queued_turn_count ?? 0) > 0 || pendingAcksForSession(msg.session_id) > 0;
       set((s) => ({
         busy: {
           ...s.busy,
-          [msg.session_id]:
-            (msg.queued_turn_count ?? 0) > 0 || pendingAcksForSession(msg.session_id) > 0,
+          [msg.session_id]: keepBusy,
         },
         streaming: { ...s.streaming, [msg.session_id]: "" },
         // 回合结束，该会话还挂着的审批/执行请求已过时：清掉，弹窗不残留。
@@ -109,6 +129,9 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       if (msg.session_id === get().currentSessionId && get().expr === "normal") {
         get().setExpr("happy", 1800);
       }
+      // 失焦时系统通知「回复已完成」（排队续跑/还有在途消息时不通知，
+      // 整串回复结束才提醒一次）。回合记账即消费。
+      finishTurn(msg.session_id, get, false, !keepBusy);
       break;
 
     case "error":
@@ -139,6 +162,9 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       if (!msg.session_id || msg.session_id === get().currentSessionId) {
         get().setExpr("sad", 3000);
       }
+      // 回合失败也算回合完成（失焦时系统通知）；无 session_id 的
+      // 全局性错误没有会话可跳，不打扰。
+      if (msg.session_id) finishTurn(msg.session_id, get, true);
       break;
 
     case "update_request":
@@ -198,6 +224,13 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       break;
     }
 
+    case "task_gone":
+      // 任务记录被需求方删除：协作端列表同步摘除条目。
+      set((s) => ({
+        tasks: s.tasks.filter((x) => x.task_id !== msg.task_id),
+      }));
+      break;
+
     case "schedule_update": {
       // 定时任务 upsert（推送只发给任务主人本人）。会话首建/重建时服务端
       // 随帧携带 SessionMeta：自有会话的 session_created 分支只替换不追加，
@@ -227,6 +260,14 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       }
       break;
     }
+
+    case "turn_state":
+      // 服务端权威的忙闲状态（共享会话由别人驱动时也能看到忙碌）。
+      // 会话是自己的且消息由本回合回显驱动时，本地已置 busy=true——
+      // 两者一致，直接覆盖不会闪回空闲。本地 busy 只有发送者会置，
+      // 其它会话（后台会话、共享会话）一律信服务端。
+      set((s) => ({ busy: { ...s.busy, [msg.session_id]: msg.busy } }));
+      break;
 
     case "session_created":
       if (msg.session.shared && msg.session.owner !== get().username) {

@@ -86,7 +86,7 @@ export function AsrPanel(): React.JSX.Element {
         </>
       )}
       {wakeError && (
-        <p style={{ margin: 0, fontSize: 11, color: "#c0392b" }}>⚠ {wakeError}</p>
+        <p style={{ margin: 0, fontSize: 11, color: "var(--danger)" }}>⚠ {wakeError}</p>
       )}
     </>
   );

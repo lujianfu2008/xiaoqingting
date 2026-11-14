@@ -1,6 +1,6 @@
 {
   "name": "@blm/desktop",
-  "version": "0.5.42",
+  "version": "0.5.69",
   "description": "小蜻蜓桌面客户端",
   "author": "blm",
   "private": true,
@@ -9,11 +9,14 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "dist": "electron-vite build && electron-builder --win",
+    "dist": "electron-vite build && electron-builder --win && node scripts/deploy-update.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",
+    "dompurify": "^3.4.17",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.2.0",
     "pinyin-pro": "^3.29.5",
     "sherpa-onnx-node": "^1.13.8",
     "three": "^0.186.1",
@@ -27,7 +30,9 @@
     "@vitejs/plugin-react": "^4.3.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.0",
+    "electron-updater": "^6.8.11",
     "electron-vite": "^2.3.0",
+    "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.6.0",

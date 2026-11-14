@@ -9,8 +9,9 @@
   font-size: var(--chat-fs, 14px);
 }
 
+/* 消息宽度：内容多长占多宽，上限整栏（原 76% 在宽面板里留死空间）；
+   短消息仍收缩为紧凑气泡，不满栏空撑。 */
 .msg {
-  max-width: 76%;
   border-radius: 12px;
   padding: 10px 14px;
   white-space: pre-wrap;
@@ -29,6 +30,46 @@
   border: 1px solid var(--border);
 }
 
+/* 消息操作（复制/重新生成）：hover 消息才出现，别常驻打扰。 */
+.msg-wrap {
+  position: relative;
+  align-self: flex-start;
+}
+.msg-wrap.user-wrap {
+  align-self: flex-end;
+  /* 用户气泡保留聊天归属感：不满栏，但长文也给足宽度 */
+  max-width: 92%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.msg-wrap:hover .msg-actions {
+  opacity: 1;
+}
+.msg-action {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.msg-action:hover {
+  color: var(--text);
+}
+.msg-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .tool-block {
   align-self: flex-start;
   font-family: ui-monospace, Consolas, monospace;
@@ -38,7 +79,6 @@
   border: 1px dashed var(--border);
   border-radius: 8px;
   padding: 6px 10px;
-  max-width: 76%;
 }
 
 .tool-block.error {
@@ -46,8 +86,181 @@
 }
 
 .tool-block.notice {
-  color: #4aa3ff;
+  color: var(--info);
 }
+
+/* ---------- 历史折叠分隔线 ---------- */
+/* 顶在会话时间线头部的一条「---- history (N) ----」：
+   线横贯整栏，标签浮在中间；点击向上展开一层历史。 */
+.history-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: calc(var(--chat-fs, 14px) - 2px);
+  flex-shrink: 0;
+}
+.history-divider .history-line {
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+.history-divider .history-label {
+  font-family: ui-monospace, Consolas, monospace;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.history-divider:hover {
+  color: var(--text);
+}
+.history-divider:hover .history-line {
+  border-top-color: var(--muted);
+}
+
+/* ---------- 助手消息 Markdown ---------- */
+/* .msg 自身是 pre-wrap（纯文本气泡的历史观感），Markdown 渲染
+   的 HTML 里有真实标签，再 pre-wrap 会双重空行，这里改回 normal。 */
+.md {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0.5em 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.35;
+}
+.md h1 {
+  font-size: 1.3em;
+}
+.md h2 {
+  font-size: 1.2em;
+}
+.md h3 {
+  font-size: 1.1em;
+}
+.md h4,
+.md h5,
+.md h6 {
+  font-size: 1em;
+}
+.md ul,
+.md ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.md li {
+  margin: 0.15em 0;
+}
+.md blockquote {
+  margin: 0.5em 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.md a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.md a:hover {
+  text-decoration: underline;
+}
+.md code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.92em;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.md pre {
+  margin: 0.6em 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.92em;
+  white-space: pre;
+}
+.md table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: left;
+}
+.md th {
+  background: var(--panel-2);
+}
+.md hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.8em 0;
+}
+.md img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+/* 助手文本里的本机路径（linkify 后的可点 chip）。 */
+.md .path-chip,
+.tool-block .path-chip {
+  display: inline-block;
+  max-width: 100%;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.9em;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  padding: 0 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: baseline;
+  max-width: 320px;
+}
+.md .path-chip:hover,
+.tool-block .path-chip:hover {
+  border-color: var(--accent, #6aa1ff);
+}
+
+/* 流式回合：光标吸附在最后一个块元素尾部（块级 .md 会把
+   尾随 ▍ 顶到独立一行，改用 ::after 跟随内容）。 */
+.msg.agent.streaming .md > :last-child::after {
+  content: "▍";
+  opacity: 0.5;
+  animation: pulse 1.2s infinite;
+}
+
+
 
 .input-bar {
   display: flex;
@@ -56,6 +269,78 @@
   border-top: 1px solid var(--border);
   background: var(--panel);
 }
+
+/* ---------- 会话 tab 栏（聊天面板顶部） ---------- */
+/* 点过的会话并开成 tab；各 tab 的草稿/附件互相独立。 */
+.session-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.session-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.session-tab:hover {
+  color: var(--text);
+  background: var(--panel);
+}
+
+.session-tab.active {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+.session-tab .tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.session-tab .tab-x {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 4px;
+}
+
+.session-tab .tab-x:hover {
+  color: var(--danger);
+  background: var(--panel-2);
+}
+
+/* 后台回合进行中的 tab：小红点提示（不用切过去也能看到）。 */
+.session-tab .tab-busy-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger, #e05555);
+}
+
 
 .input-bar textarea {
   flex: 1;
@@ -92,7 +377,7 @@
 .input-bar .recording {
   background: var(--danger);
   border-color: var(--danger);
-  color: #fff;
+  color: var(--on-accent);
   animation: pulse 1.2s infinite;
 }
 
@@ -107,7 +392,7 @@
   left: 50%;
   transform: translateX(-50%);
   background: var(--danger);
-  color: #fff;
+  color: var(--on-accent);
   padding: 8px 20px;
   border-radius: 20px;
   font-size: 13px;
@@ -122,7 +407,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--on-accent);
   display: inline-block;
   animation: pulse 1s infinite;
 }
@@ -169,4 +454,12 @@ opacity: 1;
 }
 .msg.user .attach-chip {
 margin: 1px 2px;
+}
+/* 可点击的路径 chip（阅读器入口）：光标与 hover 反馈。 */
+.attach-chip.clickable {
+cursor: pointer;
+}
+.attach-chip.clickable:hover {
+border-color: var(--accent, #6aa1ff);
+background: rgba(127, 127, 127, 0.14);
 }

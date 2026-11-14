@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
 import { executorOfTask } from "../store/types";
@@ -8,6 +8,8 @@ import { FlowBar } from "./chat/FlowBar";
 import { useVoiceInput } from "./chat/useVoiceInput";
 import { PaneTools, type PaneChrome } from "./pane/PaneTools";
 import { Splitter } from "./Splitter";
+import { SessionTabs } from "./chat/SessionTabs";
+import type { SessionAttachment } from "../store/types";
 
 // Module-level stable references: zustand selectors must not return fresh
 // object/array literals per call, or useSyncExternalStore loops (React #185).
@@ -26,15 +28,9 @@ const n = Number(localStorage.getItem(key));
 return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
-// One attachment waiting to be sent with the next message.
-interface AttachmentItem {
-name: string;
-path: string; // absolute path on this machine
-dataUrl?: string; // small thumbnail for image chips
-}
+const EMPTY_ATTACHMENTS: SessionAttachment[] = [];
 
-export function ChatPane(props: { chrome?: PaneChrome }): React.JSX.Element {
-const currentSessionId = useStore((s) => s.currentSessionId);
+export function ChatPane(props: { chrome?: PaneChrome }): React.JSX.Element {const currentSessionId = useStore((s) => s.currentSessionId);
 // 当前会话绑定的协作流任务（普通会话为 undefined，流程条不渲染）。
 const task = useStore((s) =>
 s.currentSessionId ? s.tasks.find((x) => x.session_id === s.currentSessionId) : undefined,
@@ -96,11 +92,24 @@ const role = useStore((s) => s.role);
 const t = useT();
 const send = useStore((s) => s.send);
 const interrupt = useStore((s) => s.interrupt);
-// 草稿放 store：发送失败（ack 超时/断线）时能把文本放回输入框。
-const draft = useStore((s) => s.draft);
+const regenerate = useStore((s) => s.regenerate);
+// 草稿放 store：发送失败（ack 超时/断线）时能把文本放回该会话。
+// 按会话隔离——tab 并开时各 tab 的草稿互不串（字符串兜底，
+// 非 ?? ""，同理不会引发死循环——字符串按值比较）。
+const draft = useStore((s) =>
+currentSessionId ? (s.draftsBySession[currentSessionId] ?? "") : "",
+);
 const setDraft = useStore((s) => s.setDraft);
+// 待发附件按会话存（多 tab 互不串）。兜底必须用模块级常量，
+// 不能写 ?? []——selector 每次返回新数组会让 useSyncExternalStore 死循环。
+const attachments = useStore((s) =>
+currentSessionId
+? (s.attachments[currentSessionId] ?? EMPTY_ATTACHMENTS)
+: EMPTY_ATTACHMENTS,
+);
+const addAttachments = useStore((s) => s.addAttachments);
+const removeAttachment = useStore((s) => s.removeAttachment);
 const [noSessionHint, setNoSessionHint] = useState(false);
-const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
 const [attachHint, setAttachHint] = useState<string | null>(null);
 const fileInputRef = useRef<HTMLInputElement>(null);
 const appendDraft = useStore((s) => s.appendDraft);
@@ -110,9 +119,8 @@ const bottomRef = useRef<HTMLDivElement>(null);
 useEffect(() => {
 if (currentSessionId) setNoSessionHint(false);
 }, [currentSessionId]);
-// Switching sessions drops unsent attachments — they belong to that chat.
+// 附件提示跨会话不残留（附件本身按会话存，切 tab 不清）。
 useEffect(() => {
-setAttachments([]);
 setAttachHint(null);
 }, [currentSessionId]);
 // Input-bar height and message font size, both user-adjustable and persisted.
@@ -128,6 +136,21 @@ localStorage.setItem(LS.inputHeight, String(inputH));
 useEffect(() => {
 localStorage.setItem(LS.chatFontSize, String(chatFs));
 }, [chatFs]);
+// 会话/回合切换时直接跳到底部（无动画）：smooth 的滚动要几百毫秒，
+// 大历史 + 切 tab 时用户看到的就是「内容从上往下刷一遍」。
+// 普通 delta（流式新增）才用平滑跟随。useLayoutEffect 在首帧
+// 绘制前完成定位——不闪顶部。
+const jumpKey = `${currentSessionId}:${blocks.length}`;
+const lastJump = useRef("");
+useLayoutEffect(() => {
+// 只有会话切换（或空→有内容）才瞬时跳底；key 没变说明是
+// 同一会话的正常追加，走下面的平滑跟随。
+if (jumpKey !== lastJump.current) {
+lastJump.current = jumpKey;
+bottomRef.current?.scrollIntoView({ behavior: "auto" });
+return;
+}
+}, [jumpKey]);
 useEffect(() => {
 bottomRef.current?.scrollIntoView({ behavior: "smooth" });
 }, [blocks.length, streamingText]);
@@ -181,7 +204,7 @@ if (pv.dataUrl) dataUrl = pv.dataUrl;
 // non-image or unreadable preview — the chip shows the plain 📎 icon
 }
 const name = f.name || p.split(/[\\/]/).pop() || "file";
-setAttachments((a) => (a.some((x) => x.path === p) ? a : [...a, { name, path: p, dataUrl }]));
+addAttachments([{ name, path: p, dataUrl }]);
 }
 };
 
@@ -197,19 +220,10 @@ if (!currentSessionId) {
 setNoSessionHint(true);
 return;
 }
-// Attachment lines ride in the message body: [附件] <name> → <abs path>.
-// Mark them in the main process first: files kept at their original
-// location (drag/pick) must stay readable even outside the access scope.
-void window.blm.markAttachments(
-currentSessionId,
-attachments.map((a) => a.path),
-);
-const lines = attachments.map((a) => `[附件] ${a.name} → ${a.path}`);
-const outgoing = [text, ...lines].filter(Boolean).join("\n\n");
 // send 返回 false = 未发出（断线）：保留草稿和附件，用户可直接重试。
-if (send(outgoing)) {
+// 附件随消息走（send 内标记/清空/失败放回），这里只传文本。
+if (send(text)) {
 setDraft("");
-setAttachments([]);
 }
 };
 return (
@@ -234,6 +248,7 @@ void addFiles(files);
 }}
 >
 {props.chrome && <PaneTools {...props.chrome} floating />}
+<SessionTabs />
 {task && <FlowBar task={task} />}
 <ChatMessages
 blocks={blocks}
@@ -242,7 +257,10 @@ error={error}
 notice={notice}
 voiceMsg={voiceMsg}
 noSession={!currentSessionId}
+sessionId={currentSessionId}
 bottomRef={bottomRef}
+busy={busy}
+onRegenerate={regenerate}
 />
 <Splitter
 orientation="row"
@@ -267,12 +285,12 @@ onReset={() => setInputH(INPUT_H_DEFAULT)}
 {/* 回合进行中掉线是最容易误读为「智能体不理人」的场景：显式横幅说明
     正在重连、回复会自动补上（连接状态小圆点太不显眼）。 */}
 {wsStatus !== "connected" && busy && (
-<div className="tool-block" style={{ color: "#e5a83a" }}>
+<div className="tool-block" style={{ color: "var(--warn)" }}>
 ⚠️ {t("chat.offlineBanner")}
 </div>
 )}
 {noSessionHint && (
-<div className="tool-block" style={{ color: "#e5a83a" }}>
+<div className="tool-block" style={{ color: "var(--warn)" }}>
 💡 {t("chat.noSession")}
 </div>
 )}
@@ -285,7 +303,7 @@ onReset={() => setInputH(INPUT_H_DEFAULT)}
 </div>
 )}
 {attachHint && (
-<div className="tool-block" style={{ color: "#e5a83a" }}>
+<div className="tool-block" style={{ color: "var(--warn)" }}>
 📎 {attachHint}
 </div>
 )}
@@ -311,7 +329,7 @@ online: ownerOnline ? t("chat.ownerOnline") : t("chat.ownerOffline"),
 <button
 className="attach-x"
 title="移除"
-onClick={() => setAttachments((arr) => arr.filter((_, j) => j !== i))}
+onClick={() => removeAttachment(i)}
 >
 ×
 </button>

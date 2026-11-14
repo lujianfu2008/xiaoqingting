@@ -54,4 +54,23 @@ export function registerTaskRoutes(app: FastifyInstance, manager: AgentManager):
     }
     return result.rec;
   });
+
+  // 删除已完结的任务记录（需求方；含绑定会话已删的幽灵灰显条目）。
+  app.delete("/api/tasks/:id", (req, reply) => {
+    const result = manager.deleteTask(req.userId, (req.params as { id: string }).id);
+    if (result === "ok") return reply.code(204).send();
+    const codes = {
+      not_found: 404,
+      forbidden: 403,
+      bad_status: 409,
+    } as const;
+    const messages = {
+      not_found: "任务不存在。",
+      forbidden: "只有需求方可以删除任务记录。",
+      bad_status: "任务未完结，先取消或删除任务线程。",
+    } as const;
+    return reply
+      .code(codes[result])
+      .send({ error: result, message: messages[result] });
+  });
 }

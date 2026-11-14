@@ -4,7 +4,7 @@ import { config } from "../config.js";
 import type { Store, SessionRecord, ProjectRecord } from "../store.js";
 import { isPublicAdmin } from "../users.js";
 import { isPublicExecAuthorized } from "../publicExecAuth.js";
-import { getRole, toPublicRole, type AgentRole } from "./agents.js";
+import { getRole, toPublicRole, withProjectContext, type AgentRole } from "./agents.js";
 import { TurnQueue } from "./TurnQueue.js";
 import { buildSessionOptions, type DelegationGate, type PublicSessionCtx } from "./sessionOptions.js";
 import { createPublicRun } from "./publicTools.js";
@@ -135,14 +135,24 @@ export class AgentSession {
     if (this.q) return;
     // 公有属性在每次（重）启动时解析：项目被删除/角色变化自然生效。
     const publicCtx = this.resolvePublicCtx();
+    // 项目描述注入：在对角色的一切字面替换（toPublicRole）之后拼
+    // append 尾部；描述每次（重）启动时从 store 现读，描述编辑/
+    // 项目删除自然生效。默认空间会话（project_id 为 null）不注入。
+    const projectDescription = this.record.project_id
+      ? this.store.getProject(this.record.project_id)?.description?.trim()
+      : undefined;
+    const baseRole = publicCtx?.role ?? this.role;
+    const role = projectDescription
+      ? withProjectContext(baseRole, projectDescription)
+      : baseRole;
     const options = buildSessionOptions(
       this.record,
-      this.role,
+      role,
       this.requests.execSink,
       this.abort,
       (toolName, input, agent) => this.requests.requestPermission(toolName, input, agent),
       this.gate,
-      publicCtx,
+      publicCtx ? { ...publicCtx, role } : undefined,
     );
     this.q = query({ prompt: this.turnQueue, options });
     void this.consume();
@@ -200,7 +210,7 @@ export class AgentSession {
             // turnQueue.pending 只覆盖「服务端还没写进引擎」的那部分，
             // 引擎自己队列里的由 queued_turn_count 反映。
             const engineQueued = (queued ?? 0) > 0;
-            this.busy = engineQueued || this.turnQueue.pending > 0;
+            this.setBusy(engineQueued || this.turnQueue.pending > 0);
             this.turnActive = false;
             this.gate.resetTurn();
             // 队列空了才解除看门狗：后续回合会接着来（引擎队列里排队，或
@@ -243,7 +253,7 @@ export class AgentSession {
       });
       console.error(`[session ${this.record.session_id}] agent loop error:`, scrubEngineBranding(raw));
     } finally {
-      this.busy = false;
+      this.setBusy(false);
       // 引擎循环已退出（空闲回收/出错/子进程结束）：立即自毁并经 onDispose
       // 从持有方的 Map 摘除。否则会话变僵尸，后续消息推进死队列被静默吞掉；
       // 摘除后下一条消息按 engine_session_id resume 重建，上下文不丢。
@@ -301,7 +311,7 @@ export class AgentSession {
     this.start();
     this.touch();
     this.turnQueue.push(text);
-    this.busy = true;
+    this.setBusy(true);
     // 排队的后续消息不重置看门狗死线：死线只随引擎消息续期。引擎卡死时
     // 用户的催促不该把死线越推越远（实测连发消息能无限顺延触达时间）。
     this.turnActive = true;
@@ -332,12 +342,26 @@ export class AgentSession {
     this.requests.failAll();
     this.abort.abort();
     this.turnQueue.end();
+    // 引擎循环已终结：忙闲状态复位为空闲（含看门狗强杀/出错
+    // dispose 的路径——finally 里的 setBusy(false) 已经发过则静默）。
+    this.setBusy(false);
     // 通知持有方把自己从会话表摘掉，防止僵尸会话吞掉后续消息。
     this.onDispose?.();
   }
 
   get isBusy(): boolean {
     return this.busy;
+  }
+
+  /** 忙闲翻转时告知所有共享可见的连接（协作者界面据此显示忙碌）。 */
+  private setBusy(on: boolean): void {
+    if (this.busy === on) return;
+    this.busy = on;
+    this.events.send({
+      type: "turn_state",
+      session_id: this.record.session_id,
+      busy: on,
+    });
   }
 
   // ---------- idle lifecycle ----------

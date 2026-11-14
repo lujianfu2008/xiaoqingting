@@ -46,6 +46,7 @@
   right: 0;
   width: auto;
   height: 1px;
+  transform: none;
 }
 
 .splitter::after {
@@ -63,6 +64,14 @@
 .splitter.active::after {
   width: 2px;
   background: var(--accent);
+}
+
+/* Horizontal variant: full-width line thickens in place, instead of
+   left:0/right:0/width:2px collapsing into a corner nub. */
+.splitter.row:hover::after,
+.splitter.row.active::after {
+  width: auto;
+  height: 2px;
 }
 
 /* While dragging: no text selection anywhere, and always the resize cursor —
@@ -83,19 +92,21 @@ body.resizing {
 /* One pane per row: the shared width vars must not apply, or the maximised
    pane would keep its old width and leave the window half empty. */
 .app.solo .sidebar,
+.app.solo .viewer-pane,
 .app.solo .browser-pane,
 .app.solo .main {
   width: auto;
   flex: 1 1 auto;
-  border-right: none;
+  border-left: none;
 }
 
 /* The chat is folded (or expanded over the page), so the page owns everything
    right of the sidebar rather than keeping its dragged width. */
-.app.fill-right .browser-pane {
+.app.fill-right .browser-pane,
+.app.fill-right .viewer-pane {
   width: auto;
   flex: 1 1 auto;
-  border-right: none;
+  border-left: none;
 }
 
 .pane-tools {
@@ -266,6 +277,15 @@ body.resizing {
   color: var(--text);
 }
 
+/* 会话行/任务行的忙碌小红点（与 tab 的 tab-busy-dot 同款）。 */
+.session-item .session-busy-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger, #e05555);
+}
+
 .session-item .title {
   flex: 1;
   overflow: hidden;
@@ -292,8 +312,8 @@ body.resizing {
 .admin-badge {
   margin-left: 6px;
   font-size: 10px;
-  border: 1px solid #e5a83a;
-  color: #e5a83a;
+  border: 1px solid var(--warn);
+  color: var(--warn);
   border-radius: 4px;
   padding: 0 4px;
   white-space: nowrap;
@@ -313,16 +333,17 @@ body.resizing {
   position: relative;
 }
 
-/* ---------- 内置浏览器左侧分栏（聊天在右） ---------- */
-/* Width is dragged (var) and is the flex basis; shrink is allowed only as a last
-   resort, so a window narrower than all the minimums does not clip the chat. */
+/* ---------- 内置浏览器右侧分栏（侧栏 · 聊天 · 浏览器） ---------- */
+/* Width is dragged (var) and is the flex basis; shrink is allowed only as a
+   last resort, so a window narrower than all the minimums does not clip the
+   chat. The page sits right of the chat, so its border is on the left. */
 .browser-pane {
   flex: 0 1 auto;
   width: var(--browser-w, 55%);
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   min-height: 0;
 }
 
@@ -365,7 +386,8 @@ body.resizing {
   white-space: nowrap;
 }
 
-/* The page itself is a native WebContentsView painted above this hole. */
+/* The page itself is a native WebContentsView painted above this hole.
+   网页内容默认白底不随主题（文档内容非界面 chrome）。 */
 .browser-stage {
   flex: 1;
   min-height: 0;
@@ -382,16 +404,13 @@ body.resizing {
   );
 }
 
-.browser-pane ~ .main {
-  flex: 1 1 0;
-}
-
 /* Shown instead of the pane while the page lives in its own window: gives the
    user a way back, so 弹窗 is never a one-way trip. Floats over the chat so it
-   does not reflow the split view. */
+   does not reflow the split view; anchored to the window's right edge, where
+   the pane lives. */
 .browser-popup-tip {
   position: fixed;
-  left: calc(var(--sidebar-w, 260px) + 22px);
+  right: 24px;
   bottom: 96px;
   z-index: 900;
   display: flex;
@@ -404,4 +423,459 @@ body.resizing {
   border: 1px solid var(--border);
   border-radius: 999px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- 内置文件阅读器 pane（chat 与 browser 之间） ---------- */
+/* viewer 是纯 DOM（图片/音视频走 viewer:// 流），与浏览器 pane
+   不同不需要 main 进程摆位；宽度同 browser 由拖拽 var 决定，
+   shrink 只作最后手段（窄窗口不裁 chat）。 */
+.viewer-pane {
+  flex: 0 1 auto;
+  width: var(--viewer-w, 40%);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  min-height: 0;
+  background: var(--bg);
+}
+
+.viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.viewer-bar .viewer-title {
+  color: var(--text);
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.viewer-bar .viewer-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+/* bar 上的小按钮（弹窗 / ✕ 关闭整个阅读器），样式贴 .browser-btn。 */
+.viewer-btn {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.viewer-btn:disabled {
+  opacity: 0.45;
+}
+
+/* 弹窗窗口根：满窗铺（无 pane 边框），标题栏复用 .viewer-bar。 */
+.viewer-popup-root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.viewer-popup-root .viewer-bar {
+  border-top: 1px solid var(--border);
+}
+
+.viewer-popup-root .viewer-content {
+  flex: 1;
+  min-height: 0;
+}
+
+.viewer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.viewer-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 内容区吃掉树剩下的宽度（树收缩时它不能反过来把
+   拖条推出 pane）。 */
+.viewer-main > .viewer-content,
+.viewer-main {
+  overflow: hidden;
+}
+.viewer-main > .viewer-content {
+  overflow: auto;
+}
+
+.viewer-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 文件树（可折叠；宽度由树右缘拖条调，localStorage 记住）。
+   shrink 允许：pane 比记住的树宽窄时树先收缩，
+   拖条绝不能被推出 pane（否则再也无法调窄回来）。 */
+.vtree {
+  flex: 0 1 auto;
+  width: var(--vtree-w, 200px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  min-height: 0;
+}
+
+.vtree-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.vtree-root {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* 长路径保尾部可见 */
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.vtree-fold,
+.vtree-collapse {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.vtree-collapse {
+  flex: 0 0 22px;
+  writing-mode: vertical-rl;
+}
+
+.vtree-collapse:hover,
+.vtree-fold:hover {
+  color: var(--text);
+}
+
+.vtree-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.vtree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  white-space: nowrap;
+}
+
+.vtree-row:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.vtree-row .vtree-caret {
+  flex: 0 0 12px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.vtree-row .vtree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vtree-note {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 8px;
+}
+
+/* tab 栏（样式复制自 .session-tab，独立类防漂移） */
+.viewer-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.viewer-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.viewer-tab:hover {
+  color: var(--text);
+  background: var(--panel);
+}
+
+.viewer-tab.active {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--border);
+  /* 内容区背景是 --bg：tab 与内容连成一体。 */
+  border-bottom: 1px solid var(--bg);
+  margin-bottom: -1px;
+}
+
+.viewer-tab .tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.viewer-tab .tab-x {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 4px;
+}
+
+.viewer-tab .tab-x:hover {
+  color: var(--danger);
+  background: var(--panel-2);
+}
+
+/* 内容区各 viewer 的公共样式 */
+.viewer-status {
+  padding: 24px;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.viewer-truncated {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.viewer-truncated.inline {
+  display: inline-flex;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+.viewer-text {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.viewer-md {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-md-mode {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.viewer-md-mode button {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+}
+
+.viewer-md-mode button.active {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.viewer-md-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.viewer-json {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.jv-node {
+  margin-left: 0;
+}
+
+.jv-toggle {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 4px;
+  font-family: inherit;
+}
+
+.jv-toggle:hover {
+  color: var(--text);
+}
+
+.jv-children {
+  margin-left: 18px;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+}
+
+.jv-row {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.jv-key {
+  color: var(--muted);
+  min-width: 40px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.jv-val {
+  color: var(--text);
+  word-break: break-all;
+}
+
+.viewer-media {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.viewer-media img,
+.viewer-media video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.viewer-media audio {
+  width: 100%;
+}
+
+/* PDF：canvas 逐页，页间留白 */
+.viewer-pdf {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+/* PDF 页面本体是白纸，不随主题（文档内容非界面 chrome）。 */
+.viewer-pdf canvas {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  background: #fff;
+}
+
+/* 代码 viewer（highlight.js）：代码块不换行（横向滚动，
+   源码断行反而伤可读性），其余沿 .viewer-text 基础样式。
+   配色不写死：高亮主题是官方模板资源（highlight.js/styles/
+   *.css，社区标准配色），按用户选择运行时注入——见
+   viewer/codeTheme.ts。主题自带 .hljs 背景色，这里补个底。 */
+.viewer-text.code-view {
+  white-space: pre;
+  overflow: auto;
+  word-break: normal;
+  tab-size: 4;
 }

@@ -13,7 +13,7 @@ function statusText(t: ReturnType<typeof useT>, s: UpdateRequestView["status"]):
 }
 
 function statusColor(s: UpdateRequestView["status"]): string {
-  return s === "pending" ? "#e5a83a" : s === "approved" ? "#4aa36a" : "#e56";
+  return s === "pending" ? "var(--warn)" : s === "approved" ? "var(--ok)" : "var(--danger)";
 }
 
 export function UpdateRequestsDialog({ onClose }: { onClose: () => void }): React.JSX.Element {

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { useT, type Key } from "../../i18n";
+import { CODE_THEMES, applyCodeTheme, loadCodeTheme, saveCodeTheme } from "../viewer/codeTheme";
+import { UI_THEMES, loadUiTheme, saveUiTheme, applyUiTheme } from "../theme/uiTheme";
 
 type ScopeMode = AccessScopeState["mode"];
 
@@ -13,17 +15,51 @@ const MODE_HINTS: Record<ScopeMode, Key> = {
   custom: "gen.modeCustomHint",
 };
 
+/** 字节数 → 人类可读（下载速度显示用）。 */
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}MB/s`;
+  if (n >= 1024) return `${(n / 1024).toFixed(0)}KB/s`;
+  return `${n}B/s`;
+}
+
 export function GeneralPanel(): React.JSX.Element {
   const avatarMode = useStore((s) => s.avatarMode);
   const setAvatarMode = useStore((s) => s.setAvatarMode);
   const avatarVisible = useStore((s) => s.avatarVisible);
   const setAvatarVisible = useStore((s) => s.setAvatarVisible);
+  const notifyEnabled = useStore((s) => s.notifyEnabled);
+  const setNotifyEnabled = useStore((s) => s.setNotifyEnabled);
+  const viewerAutoOpen = useStore((s) => s.viewerAutoOpen);
+  const setViewerAutoOpen = useStore((s) => s.setViewerAutoOpen);
   const [workDir, setWorkDir] = useState<string | null>(null);
   const [mode, setMode] = useState<ScopeMode>("workspace");
   const [folders, setFolders] = useState<string[]>([]);
   const [closeAction, setCloseAction] = useState<"quit" | "tray">("quit");
+  // 手动检查更新的就地反馈（无新版/发现新版/失败）。
+  const [updateState, setUpdateState] = useState<
+    "idle" | "checking" | "none" | "found" | "error"
+  >("idle");
+  // 自动更新下载进度（主进程节流推送；null = 没有下载在进行）。
+  const [dlProgress, setDlProgress] = useState<{
+    phase: "idle" | "downloading" | "downloaded";
+    percent: number;
+    transferred?: number;
+    total?: number;
+    bytesPerSecond?: number;
+  } | null>(null);
+  useEffect(
+    () =>
+      window.blm.onUpdateProgress((s) =>
+        setDlProgress(s.phase === "idle" ? null : s),
+      ),
+    [],
+  );
   // 界面语言（初始值取主进程已解析语言；选「跟随系统」后按原始选择显示）。
   const [lang, setLang] = useState<"system" | "zh-CN" | "en">("zh-CN");
+  // 代码高亮主题（阅读器源码配色，官方模板清单）。
+  const [codeTheme, setCodeTheme] = useState(loadCodeTheme);
+  // 界面主题（整窗配色，见 styles/themes.css）。
+  const [uiTheme, setUiTheme] = useState(loadUiTheme);
   const t = useT();
 
   const refreshScope = (): void => {
@@ -231,6 +267,147 @@ export function GeneralPanel(): React.JSX.Element {
         </label>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
           {t("gen.avatarShowHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("gen.notify")}</label>
+        <label
+          style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={notifyEnabled}
+            onChange={(e) => setNotifyEnabled(e.target.checked)}
+          />
+          <span style={{ fontSize: 12 }}>{t("gen.notify")}</span>
+        </label>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("gen.notifyHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("vw.autoOpen")}</label>
+        <label
+          style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={viewerAutoOpen}
+            onChange={(e) => setViewerAutoOpen(e.target.checked)}
+          />
+          <span style={{ fontSize: 12 }}>{t("vw.autoOpen")}</span>
+        </label>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("vw.autoOpenHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("gen.uiTheme")}</label>
+        <select
+          value={uiTheme}
+          onChange={(e) => {
+            const id = e.target.value;
+            setUiTheme(id); // 换变量即换配色，先落 UI 再写存储
+            saveUiTheme(id);
+            applyUiTheme(id);
+          }}
+        >
+          {UI_THEMES.map((th) => (
+            <option key={th.id} value={th.id}>
+              {t(th.labelKey)}
+            </option>
+          ))}
+        </select>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("gen.uiThemeHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("gen.codeTheme")}</label>
+        <select
+          value={codeTheme}
+          onChange={(e) => {
+            const id = e.target.value;
+            setCodeTheme(id); // 模板加载很快，先落 UI 再注入
+            saveCodeTheme(id);
+            void applyCodeTheme(id);
+          }}
+        >
+          {CODE_THEMES.map((th) => (
+            <option key={th.id} value={th.id}>
+              {th.label}
+            </option>
+          ))}
+        </select>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("gen.codeThemeHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("gen.updateCheck")}</label>
+        {/* 手动重查一次：没有新版就地提示；发现新版后台继续
+            下载，下载中显示进度条（主进程节流推送），完成走
+            主进程弹窗（不在这里打断）。 */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+          <button
+            disabled={updateState === "checking"}
+            onClick={() => {
+              setUpdateState("checking");
+              window.blm
+                .checkUpdate()
+                .then((r) => setUpdateState(r === "available" ? "found" : r === "up_to_date" ? "none" : "error"))
+                .catch(() => setUpdateState("error"));
+            }}
+          >
+            {updateState === "checking" ? t("gen.updateChecking") : t("gen.updateCheck")}
+          </button>
+          {updateState === "none" && (
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>{t("gen.updateNone")}</span>
+          )}
+          {updateState === "error" && (
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {t("gen.updateError")}
+            </span>
+          )}
+        </div>
+        {dlProgress && (
+          <div style={{ marginTop: 8 }}>
+            <div
+              style={{
+                height: 6,
+                borderRadius: 3,
+                background: "var(--border)",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${dlProgress.phase === "downloaded" ? 100 : dlProgress.percent}%`,
+                  background: "var(--accent, #4a9eff)",
+                  transition: "width 0.3s ease",
+                }}
+              />
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+              {dlProgress.phase === "downloaded"
+                ? t("gen.updateDownloaded")
+                : t("gen.updateDownloading", {
+                    percent: dlProgress.percent.toFixed(0),
+                    speed: dlProgress.bytesPerSecond
+                      ? formatBytes(dlProgress.bytesPerSecond)
+                      : "—",
+                  })}
+            </div>
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("gen.updateNoneHint")}
         </div>
       </div>
     </>

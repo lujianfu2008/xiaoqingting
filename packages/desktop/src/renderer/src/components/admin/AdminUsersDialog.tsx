@@ -78,11 +78,11 @@ export function AdminUsersDialog({
   const statusBadge = (u: AdminUserDetail): React.JSX.Element | null => {
     if (u.status === "pending") {
       return (
-        <span style={{ color: "#e5a83a", whiteSpace: "nowrap" }}>{t("au.reviewPending")}</span>
+        <span style={{ color: "var(--warn)", whiteSpace: "nowrap" }}>{t("au.reviewPending")}</span>
       );
     }
     if (u.status === "rejected") {
-      return <span style={{ color: "#e56", whiteSpace: "nowrap" }}>{t("au.reviewRejected")}</span>;
+      return <span style={{ color: "var(--danger)", whiteSpace: "nowrap" }}>{t("au.reviewRejected")}</span>;
     }
     return null;
   };
@@ -252,7 +252,7 @@ export function AdminUsersDialog({
                   gap: 8,
                   fontSize: 12,
                   border:
-                    u.status === "pending" ? "1px solid #e5a83a" : "1px solid var(--border, #444)",
+                    u.status === "pending" ? "1px solid var(--warn)" : "1px solid var(--border, #444)",
                   borderRadius: 8,
                   padding: "6px 8px",
                 }}
@@ -274,7 +274,7 @@ export function AdminUsersDialog({
                 <span style={{ flex: 1, whiteSpace: "nowrap" }}>
                   {roleLabel(u)}
                   {u.immutable && (
-                    <span title={t("au.immutable")} style={{ color: "#e5a83a" }}>
+                    <span title={t("au.immutable")} style={{ color: "var(--warn)" }}>
                       ★
                     </span>
                   )}
@@ -289,7 +289,7 @@ export function AdminUsersDialog({
                     className={`status-dot ${u.online ? "ok" : "bad"}`}
                     title={u.online ? t("au.online") : t("au.offline")}
                   />
-                  {u.disabled && <span style={{ color: "#e56" }}>{t("au.disabled")}</span>}
+                  {u.disabled && <span style={{ color: "var(--danger)" }}>{t("au.disabled")}</span>}
                   {statusBadge(u)}
                 </span>
                 <span

@@ -159,6 +159,7 @@ export class Store {
     name: string,
     agentId: string,
     visibility: "personal" | "public" = "personal",
+    description?: string,
   ): ProjectRecord {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -170,6 +171,7 @@ export class Store {
       created_at: now,
       updated_at: now,
       visibility,
+      ...(description ? { description } : {}),
     };
     if (visibility === "public") {
       // 公有域项目：工作空间在服务端，客户端永不感知此路径。
@@ -189,6 +191,16 @@ export class Store {
     } catch {
       return null;
     }
+  }
+
+  /** Update the optional project description (access pre-checked). */
+  updateProjectDescription(id: string, description: string): ProjectRecord | null {
+    const rec = this.getProject(id);
+    if (!rec) return null;
+    rec.description = description; // "" = 清空
+    rec.updated_at = new Date().toISOString();
+    fs.writeFileSync(this.projectPath(id), JSON.stringify(rec, null, 2));
+    return rec;
   }
 
   /** 本人全部项目 + 所有公有域项目（公域部分带 owner）。 */
@@ -297,6 +309,10 @@ export class Store {
     } catch {
       return null;
     }
+  }
+
+  deleteTask(id: string): void {
+    fs.rmSync(this.taskPath(id), { force: true });
   }
 
   listTasks(): TaskRecord[] {

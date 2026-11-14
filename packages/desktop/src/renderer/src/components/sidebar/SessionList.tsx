@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { Block, ProjectMeta, SessionMeta, TaskView } from "@blm/protocol";
+import { useEffect, useRef, useState } from "react";
+import type { Block, ProjectMeta, SessionMeta, SessionSearchItem, TaskView } from "@blm/protocol";
 import { useStore } from "../../store";
 import { apiBase } from "../../store/http";
 import { useT } from "../../i18n";
@@ -10,6 +10,62 @@ import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 // My sessions grouped by project (default space last), then shared (read-only)
 // sessions. The share/delete buttons live inside each row; both stop
 // propagation so they don't select.
+
+// 搜索命中片段：snippet 里命中词以 ** 包裹，拆开渲染高亮。
+// 服务端已截好 ~60 字上下文，这里只做拆分。
+function HighlightedSnippet({ snippet }: { snippet: string }): React.JSX.Element {
+  const parts = snippet.split(/\*\*/);
+  // split 把 ** 包裹的词放在奇数下标。
+  return (
+    <>
+      {parts.map((p, i) =>
+        i % 2 === 1 ? (
+          <mark key={i} style={{ background: "rgba(229,168,58,.35)", color: "inherit" }}>
+            {p}
+          </mark>
+        ) : (
+          <span key={i}>{p}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+// 内容搜索结果行：会话标题 + 命中片段（高亮），点击进会话。
+function SearchHitRow({ item, q }: { item: SessionSearchItem; q: string }): React.JSX.Element {
+  const selectSession = useStore((s) => s.selectSession);
+  const t = useT();
+  const first = item.matches[0];
+  return (
+    <div
+      className="session-item search-hit"
+      title={t("sess.hitCount", { count: item.total })}
+      onClick={() => void selectSession(item.session_id)}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span className="title" style={{ color: "var(--text)" }}>{item.session_title}</span>
+          <span style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap" }}>
+            {t("sess.hitCount", { count: item.total })}
+          </span>
+        </div>
+        {first && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <HighlightedSnippet snippet={first.snippet} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function SessionRow({
   s,
@@ -25,6 +81,8 @@ function SessionRow({
   const selectSession = useStore((sel) => sel.selectSession);
   const deleteSession = useStore((sel) => sel.deleteSession);
   const renameSession = useStore((sel) => sel.renameSession);
+  // 与 tab 同款：该会话后台回合进行中的小红点（不切过去也能看到）。
+  const busy = useStore((sel) => sel.busy[s.session_id] ?? false);
   const t = useT();
   // 行内重命名：编辑态时标题变输入框（Enter/blur 提交，Esc 取消，空标题不提交）。
   const [editing, setEditing] = useState(false);
@@ -51,7 +109,7 @@ function SessionRow({
           useStore.setState({ error: t("sess.exportFail") });
           return;
         }
-        blocks = (await res.json()) as Block[];
+        blocks = ((await res.json()) as { blocks: Block[] }).blocks;
       } catch {
         useStore.setState({ error: t("sess.exportFail") });
         return;
@@ -78,6 +136,7 @@ function SessionRow({
           : undefined
       }
     >
+      {busy && <span className="session-busy-dot" title={t("chat.tabBusyTip")} />}
       {editing ? (
         <input
           autoFocus
@@ -127,7 +186,7 @@ function SessionRow({
               : t("sess.sharedAll")
             : t("sess.share")
         }
-        style={s.shared ? { color: "#4aa3ff" } : undefined}
+        style={s.shared ? { color: "var(--info)" } : undefined}
         onClick={(e) => {
           e.stopPropagation();
           onShare(s.session_id);
@@ -156,19 +215,30 @@ const groupHeaderStyle = {
   padding: "0 8px",
 } as const;
 
+// 共享行的小红点（内联组件：list 顶层订阅 busy 会随任何会话
+// 的回合结束整表重渲；组件级订阅只重渲变化的那几行）。
+function SessionBusyDot({ sessionId }: { sessionId: string }): React.JSX.Element | null {
+  const busy = useStore((s) => s.busy[sessionId] ?? false);
+  const t = useT();
+  if (!busy) return null;
+  return <span className="session-busy-dot" title={t("chat.tabBusyTip")} />;
+}
+
 // 协作任务状态徽标配色（与 UpdateRequestsDialog 的状态色一致风格）。
 // active 按当前环节位置给色，让进行中的任务一眼可辨进度深浅。
-const TASK_COLOR_ACTIVE = "#4aa3ff";
-const TASK_COLOR_DONE = "#4aa36a";
-const TASK_COLOR_CANCELLED = "#8a8a8a";
+const TASK_COLOR_ACTIVE = "var(--info)";
+const TASK_COLOR_DONE = "var(--ok)";
+const TASK_COLOR_CANCELLED = "var(--muted)";
 
 // 协作任务行：标题 + 我的角色角标（需求/我负责的环节名）+ 状态徽标；done
 // （含取消）灰显。点击进线程：自己是需求方走本人会话，否则走共享只读视图。
 function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
   const me = useStore((s) => s.username);
   const currentSessionId = useStore((s) => s.currentSessionId);
+  const busy = useStore((s) => s.busy[task.session_id] ?? false);
   const selectSession = useStore((s) => s.selectSession);
   const selectSharedSession = useStore((s) => s.selectSharedSession);
+  const deleteTask = useStore((s) => s.deleteTask);
   const t = useT();
   const roles: string[] = [];
   if (task.requester === me) roles.push(t("task.tagRequester"));
@@ -199,12 +269,13 @@ function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
       title={`${t("task.roleRequester")}: ${task.requester}${assignees ? ` · ${assignees}` : ""}`}
       onClick={() => void (mine ? selectSession(task.session_id) : selectSharedSession(task.session_id))}
     >
+      {busy && <span className="session-busy-dot" title={t("chat.tabBusyTip")} />}
       <span className="title">{task.title}</span>
       {roles.length > 0 && (
         <span
           style={{
             fontSize: 10,
-            color: "#4aa3ff",
+            color: "var(--info)",
             border: "1px solid rgba(74,163,255,.4)",
             borderRadius: 999,
             padding: "0 5px",
@@ -215,6 +286,20 @@ function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
         </span>
       )}
       <span style={{ fontSize: 11, color: statusColor, whiteSpace: "nowrap" }}>{statusLabel}</span>
+      {/* 已完结任务记录可由需求方删除（含绑定会话已删的幽灵条目）。 */}
+      {mine && done && (
+        <button
+          className="del"
+          title={t("task.deleteRecord")}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm(t("task.deleteConfirm", { name: task.title })))
+              void deleteTask(task.task_id);
+          }}
+        >
+          ✕
+        </button>
+      )}
       {!mine && <span className="offline-tip">{task.requester}</span>}
     </div>
   );
@@ -277,7 +362,7 @@ function ProjectGroup({
         >
           {isPublic ? "🌐" : "📁"} {project.name}
           {!isPublic && folder === null && (
-            <span style={{ color: "#e5a83a" }}>{t("proj.unbound")}</span>
+            <span style={{ color: "var(--warn)" }}>{t("proj.unbound")}</span>
           )}
         </span>
         {!isPublic && (
@@ -316,6 +401,21 @@ function ProjectGroup({
           </button>
         )}
       </div>
+      {project.description && (
+        <div
+          title={project.description}
+          style={{
+            margin: "0 8px 2px",
+            fontSize: 11,
+            color: "var(--muted)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {project.description}
+        </div>
+      )}
       {sessions.map((s) => (
         <SessionRow
           key={s.session_id}
@@ -358,13 +458,56 @@ export function SessionList({
   } | null>(null);
   // Which project's settings dialog is open (null = none).
   const [settingsFor, setSettingsFor] = useState<ProjectMeta | null>(null);
-  // 会话搜索（纯客户端）：命中标题或共享会话的 owner。
+  // 会话搜索（标题纯客户端 + 内容走服务端）：命中标题或共享会话的
+  // owner 即过滤列表；输入 ≥1 字时同时触发内容全文搜索（300ms 防抖）。
   const [query, setQuery] = useState("");
+  const [contentHits, setContentHits] = useState<SessionSearchItem[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const q = query.trim().toLowerCase();
   const matchSession = (s: SessionMeta): boolean =>
     !q ||
     s.title.toLowerCase().includes(q) ||
     (s.owner ?? "").toLowerCase().includes(q);
+
+  // 内容搜索：防抖 300ms 后请求 /api/sessions/search；请求序号守卫
+  // （响应乱序时丢弃旧响应）。标题命中的会话不再进内容结果，去重。
+  const searchSeq = useRef(0);
+  useEffect(() => {
+    const kw = query.trim();
+    if (kw.length < 1) {
+      setContentHits(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const st = useStore.getState();
+    const seq = ++searchSeq.current;
+    const timer = window.setTimeout(() => {
+      fetch(`${apiBase(st.serverUrl)}/api/sessions/search?q=${encodeURIComponent(kw)}`, {
+        headers: { Authorization: `Bearer ${st.token}` },
+      })
+        .then((res) => (res.ok ? (res.json() as Promise<SessionSearchItem[]>) : []))
+        .then((items) => {
+          if (searchSeq.current !== seq) return; // 旧响应，丢弃
+          setContentHits(items);
+          setSearching(false);
+        })
+        .catch(() => {
+          if (searchSeq.current !== seq) return;
+          setContentHits([]);
+          setSearching(false);
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      searchSeq.current++; // 取消在途：效果等同旧响应
+      setSearching(false);
+    };
+  }, [query]);
+  // 内容搜索结果里去掉标题命中的会话（避免同一会话出现两行）。
+  const contentOnly = (contentHits ?? []).filter(
+    (item) => !sessions.some((s) => s.session_id === item.session_id && matchSession(s)),
+  );
 
   // 公有域项目单独分区展示（工作空间在服务端，而非本机文件夹）。
   const personalProjects = projects.filter((p) => p.visibility !== "public");
@@ -396,7 +539,13 @@ export function SessionList({
     .filter(matchSession)
     .filter((s) => !taskSessionIds.has(s.session_id));
   const nothingVisible =
-    q !== "" && visiblePersonal.length === 0 && visiblePublic.length === 0 && def.length === 0 && visibleShared.length === 0 && visibleTasks.length === 0;
+    q !== "" &&
+    visiblePersonal.length === 0 &&
+    visiblePublic.length === 0 &&
+    def.length === 0 &&
+    visibleShared.length === 0 &&
+    visibleTasks.length === 0 &&
+    contentOnly.length === 0;
 
   const menuSession = moveMenu
     ? sessions.find((s) => s.session_id === moveMenu.sessionId)
@@ -499,9 +648,24 @@ export function SessionList({
       ))}
       {newTaskOpen && <NewTaskDialog onClose={() => setNewTaskOpen(false)} />}
 
-      {nothingVisible && (
+      {/* 会话内容搜索结果（含只命中内容、标题未中的会话）。 */}
+      {q !== "" && contentOnly.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", padding: "0 8px" }}>
+          {t("sess.contentHeader")}
+        </div>
+      )}
+      {contentOnly.map((item) => (
+        <SearchHitRow key={item.session_id} item={item} q={q} />
+      ))}
+      {q !== "" && searching && contentOnly.length === 0 && (
         <div style={{ margin: "6px 8px", fontSize: 12, color: "var(--muted)" }}>
-          {t("sess.noMatch")}
+          {t("sess.searching")}
+        </div>
+      )}
+
+      {nothingVisible && !searching && (
+        <div style={{ margin: "6px 8px", fontSize: 12, color: "var(--muted)" }}>
+          {contentHits !== null && t("sess.noContent") || t("sess.noMatch")}
         </div>
       )}
 
@@ -519,6 +683,7 @@ export function SessionList({
             title={t("sess.viewTip", { owner: s.owner ?? "", online: online ? t("chat.ownerOnline") : t("chat.ownerOffline") })}
             onClick={() => void selectSharedSession(s.session_id)}
           >
+            <SessionBusyDot sessionId={s.session_id} />
             <span className="title">
               {s.owner} / {s.title}
             </span>

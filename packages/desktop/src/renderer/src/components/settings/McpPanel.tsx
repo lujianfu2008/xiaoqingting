@@ -248,7 +248,7 @@ function ServerForm({
               placeholder="KEY=VALUE"
             />
           </div>
-          <div style={{ fontSize: 11, color: "#c66" }}>{t("mcp.stdioWarn")}</div>
+          <div style={{ fontSize: 11, color: "var(--danger)" }}>{t("mcp.stdioWarn")}</div>
         </>
       ) : (
         <>
@@ -434,7 +434,7 @@ function CardBadges({ card }: { card: McpRegistryCard }): React.JSX.Element {
         <span style={{ fontSize: 10, color: "var(--muted)" }}>[{t("mcp.badgePkg")}]</span>
       )}
       {card.remote?.needs_auth && (
-        <span style={{ fontSize: 10, color: "#c66" }}>{t("mcp.needAuth")}</span>
+        <span style={{ fontSize: 10, color: "var(--danger)" }}>{t("mcp.needAuth")}</span>
       )}
     </>
   );
@@ -597,7 +597,7 @@ function MarketSection(): React.JSX.Element {
                   </span>
                 )}
                 {card.pkg?.env_required && (
-                  <span style={{ fontSize: 10, color: "#c66" }}>
+                  <span style={{ fontSize: 10, color: "var(--danger)" }}>
                     {t("mcp.envRequired", { names: card.pkg.env_required.join(", ") })}
                   </span>
                 )}

@@ -56,14 +56,17 @@
   88% { transform: translateX(-2px); }
 }
 
-/* blinking eyelids — quick close ~once every 5s */
+/* blinking eyelids — quick close ~once every 5s.
+   Two stacked ellipses per eye: green skin over the eyeball, then a
+   translucent dark shadow so the shut eye reads as a crease, not a hole. */
 .dfly .eyelid {
   transform-box: view-box;
   transform-origin: 78px 26px;
   transform: scaleY(0);
   animation: dfly-blink 5.2s ease-in-out infinite;
 }
-.dfly .eyeL-eye-x + .eyelid { transform-origin: 78px 26px; }
+.dfly .lidg-l .eyelid { transform-origin: 78px 26px; }
+.dfly .lidg-r .eyelid { transform-origin: 122px 26px; }
 @keyframes dfly-blink {
   0%, 91%, 100% { transform: translateY(0) scaleY(0); }
   93.5% { transform: translateY(21px) scaleY(1); }

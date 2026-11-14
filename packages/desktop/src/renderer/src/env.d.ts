@@ -1,11 +1,22 @@
 // Ambient declarations for the renderer process.
 
+/// <reference types="vite/client" />
+
+import type {
+  ViewerListDirResult,
+  ViewerOpenDialogResult,
+  ViewerReadResult,
+  ViewerStatResult,
+} from "@blm/protocol";
+
 declare global {
   interface BrowserState {
     mode: "embedded" | "popup";
     open: boolean;
     url: string;
     title: string;
+    /** The focused session this state describes. */
+    session_id: string;
   }
 
   // Mirrors main/executor/accessScope.ts accessScopeState().
@@ -35,6 +46,7 @@ declare global {
       setSessionProject(sessionId: string, projectId: string | null): Promise<void>;
       forgetSession(sessionId: string): Promise<void>;
       onOpenSettings(cb: () => void): () => void;
+      onOpenFiles(cb: () => void): () => void;
       getLanguage(): Promise<string>;
       setLanguage(lang: "system" | "zh-CN" | "en"): Promise<string>;
       checkLocalLogin(userOrEid: string): Promise<{ locked: boolean }>;
@@ -65,6 +77,19 @@ declare global {
       wakeStop(): void;
       onWakeDetected(cb: (keyword: string) => void): () => void;
       focusWindow(): Promise<void>;
+      notify(args: { title: string; body?: string; session_id?: string }): Promise<void>;
+      onNotifyActivate(cb: (sessionId: string | null) => void): () => void;
+      bindUpdater(serverUrl: string): Promise<void>;
+      checkUpdate(): Promise<"up_to_date" | "available" | "error">;
+      onUpdateProgress(
+        cb: (s: {
+          phase: "idle" | "downloading" | "downloaded";
+          percent: number;
+          transferred?: number;
+          total?: number;
+          bytesPerSecond?: number;
+        }) => void,
+      ): () => void;
       relayConfigure(req: {
         server_url: string;
         token: string;
@@ -89,8 +114,17 @@ declare global {
         default_filename: string;
         markdown: string;
       }): Promise<{ saved: boolean; path: string | null; error?: string }>;
+      viewer: {
+        stat(path: string): Promise<ViewerStatResult>;
+        listDir(path: string): Promise<ViewerListDirResult>;
+        read(path: string): Promise<ViewerReadResult>;
+        openDialog(): Promise<ViewerOpenDialogResult>;
+        popOut(path: string): Promise<{ error?: string }>;
+        openExternal(path: string): Promise<{ error?: string }>;
+      };
       browser: {
         state(): Promise<BrowserState>;
+        setActiveSession(sessionId: string | null): Promise<void>;
         setBounds(rect: { x: number; y: number; width: number; height: number }): Promise<void>;
         setMode(mode: "embedded" | "popup"): Promise<BrowserState>;
         open(url: string): Promise<{ ok: boolean; error?: string }>;

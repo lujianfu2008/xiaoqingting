@@ -27,9 +27,9 @@ export async function executeLocal(
 ): Promise<ExecOutcome> {
   const { action, params, session_id } = req;
 
-  // Browser actions don't need a work dir.
+  // Browser actions don't need a work dir; pages are per-session.
   if (BROWSER_ACTIONS.has(action)) {
-    return runBrowserAction(win, action, params);
+    return runBrowserAction(win, action, params, session_id ?? null);
   }
 
   // The session's project decides both its work dir and its read-scope mode.

@@ -60,22 +60,28 @@ export function DragonflyEyes(): React.JSX.Element {
         <circle className="spark s6" cx="122" cy="57" r="1.8" fill="#d1f6ff" />
       </g>
 
-      {/* highlights + blinking eyelids */}
-      <g clipPath="url(#dx-eyeL-clip)">
+      {/* highlights + lids */}
+      <g className="lidg-l" clipPath="url(#dx-eyeL-clip)">
         <circle className="hl" cx="70" cy="40" r="3.6" fill="#ffffff" opacity="0.95" />
-        <ellipse className="eyelid" cx="78" cy="26" rx="24" ry="24" fill="#0a3f63" />
+        <circle cx="78" cy="48" r="22" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.1" />
+        {/* resident upper lid — 沿眼球上弧盖一条月牙，眼睛不再是裸球 */}
+        <path className="lid-live" fill="url(#dx-lid)" d="M50 44 Q78 24 106 44 L106 14 L50 14 Z" />
+        <path className="lid-line" d="M50 44 Q78 24 106 44" fill="none" stroke="#0d5c33" strokeWidth="1.8" strokeLinecap="round" />
+        {/* blink lid (animates shut) */}
+        <ellipse className="eyelid" cx="78" cy="26" rx="24" ry="24" fill="url(#dx-lid)" />
+        <ellipse className="eyelid" cx="78" cy="26" rx="24" ry="24" fill="#0a3f63" opacity="0.35" />
       </g>
-      <g clipPath="url(#dx-eyeR-clip)">
+      <g className="lidg-r" clipPath="url(#dx-eyeR-clip)">
         <circle className="hl" cx="114" cy="40" r="3.6" fill="#ffffff" opacity="0.95" />
-        <ellipse className="eyelid" cx="122" cy="26" rx="24" ry="24" fill="#0a3f63" />
+        <circle cx="122" cy="48" r="22" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.1" />
+        <path className="lid-live" fill="url(#dx-lid)" d="M94 44 Q122 24 150 44 L150 14 L94 14 Z" />
+        <path className="lid-line" d="M94 44 Q122 24 150 44" fill="none" stroke="#0d5c33" strokeWidth="1.8" strokeLinecap="round" />
+        <ellipse className="eyelid" cx="122" cy="26" rx="24" ry="24" fill="url(#dx-lid)" />
+        <ellipse className="eyelid" cx="122" cy="26" rx="24" ry="24" fill="#0a3f63" opacity="0.35" />
       </g>
       {/* brows (sad / curious) */}
       <path className="brow browL" d="M66 22 Q78 18 88 24" fill="none" stroke="#0a3f63" strokeWidth="3" strokeLinecap="round" />
       <path className="brow browR" d="M112 24 Q122 18 134 22" fill="none" stroke="#0a3f63" strokeWidth="3" strokeLinecap="round" />
-      <g fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.1">
-        <circle cx="78" cy="48" r="22" />
-        <circle cx="122" cy="48" r="22" />
-      </g>
     </>
   );
 }

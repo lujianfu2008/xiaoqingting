@@ -3,10 +3,20 @@ productName: 小蜻蜓
 # 安装包文件名用 ASCII，避免中文名在下载/传输环节出问题
 artifactName: xqt-setup-${version}.${ext}
 electronVersion: 33.4.11
+# 安装包内的主程序 exe 用 ASCII 名：部分中文 Windows 上
+# ShellExecute 处理非 ASCII 可执行名失败，会弹「请安装应用，
+# 若已安装请在默认应用设置中创建关联」。窗口标题/开始菜单
+# 仍是中文（productName 不变，只影响 安装目录/Xiaoqingting.exe）。
+executableName: Xiaoqingting
 # 安装完成后不自动启动：oneClick 收尾的 StdUtils.ExecShellAsUser 在部分中文
 # Windows 上弹「该文件没有与之关联的应用」错误框，改由用户从快捷方式启动。
 nsis:
   runAfterFinish: false
+# 占位 generic 源：仅为让 electron-builder 生成 latest.yml（真源在运行时
+# 由 updater.ts setFeedURL 指向用户所连服务器的 /download/，此地址不生效）。
+publish:
+  - provider: generic
+    url: "https://localhost/download/"
 directories:
   output: release
 files:

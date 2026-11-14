@@ -32,8 +32,14 @@ export class SessionRegistry {
 
   // ---------- projects ----------
 
-  createProject(userId: string, name: string, agentId: string, visibility: "personal" | "public" = "personal") {
-    return this.store.createProject(userId, name, agentId, visibility);
+  createProject(
+    userId: string,
+    name: string,
+    agentId: string,
+    visibility: "personal" | "public" = "personal",
+    description?: string,
+  ) {
+    return this.store.createProject(userId, name, agentId, visibility, description);
   }
 
   listProjects(userId: string) {

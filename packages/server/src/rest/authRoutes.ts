@@ -98,7 +98,7 @@ export function registerAuthRoutes(app: FastifyInstance, manager: AgentManager):
   });
 
   app.addHook("onRequest", async (req, reply) => {
-    if (req.url.startsWith("/auth/") || req.url.startsWith("/health") || req.url.startsWith("/ws")) return;
+    if (req.url.startsWith("/auth/") || req.url.startsWith("/health") || req.url.startsWith("/ws") || req.url.startsWith("/download/")) return;
     const header = req.headers.authorization;
     const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
     const payload = token ? verifyToken(token) : null;

@@ -59,7 +59,7 @@ export function RelayPanel(): React.JSX.Element {
       </p>
 
       {myRelay && masterOff && (
-        <p style={{ margin: 0, fontSize: 11, color: "#e5a83a" }}>⚠ {t("relay.masterOff")}</p>
+        <p style={{ margin: 0, fontSize: 11, color: "var(--warn)" }}>⚠ {t("relay.masterOff")}</p>
       )}
 
       <div className="field">
@@ -78,9 +78,9 @@ export function RelayPanel(): React.JSX.Element {
         {t("relay.localState")}
         {local?.enabled ? (
           local.connected ? (
-            <span style={{ color: "#2a9d5c" }}>{t("relay.on")}</span>
+            <span style={{ color: "var(--ok)" }}>{t("relay.on")}</span>
           ) : (
-            <span style={{ color: "#e5a83a" }}>{t("relay.off")}</span>
+            <span style={{ color: "var(--warn)" }}>{t("relay.off")}</span>
           )
         ) : (
           t("relay.off")

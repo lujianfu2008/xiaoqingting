@@ -3,8 +3,9 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { PaneTools, type PaneChrome } from "./pane/PaneTools";
 
-// Left pane of the split view. In embedded mode the actual page lives in a
-// WebContentsView owned by the main process (it is drawn *above* the renderer),
+// Rightmost pane of the split view (sidebar · chat · browser). In
+// embedded mode the actual page lives in a WebContentsView owned by the
+// main process (it is drawn *above* the renderer),
 // so this component only provides the hole: it reports the stage's rect over
 // IPC and collapses it to zero while a modal overlay covers the window.
 //

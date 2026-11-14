@@ -93,9 +93,9 @@ export class ClientRequests {
     if (this.isDisposed()) {
       return Promise.resolve({ ok: false, error: "会话已关闭。" });
     }
-    // Local actions run on the current exec target's client (协作任务跟随负责
-    // 人，普通会话跟随最近发言人). If they are offline, fail now instead of
-    // waiting for the full client timeout.
+    // Local actions run on the current exec target's client (协作任务
+    // 跟随负责人，共享会话钉死会话主人). If they are offline, fail now
+    // instead of waiting for the full client timeout.
     if (this.events.isExecutorOnline && !this.events.isExecutorOnline()) {
       return Promise.resolve({
         ok: false,

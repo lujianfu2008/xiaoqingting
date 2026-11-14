@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import type { ProjectMeta } from "@blm/protocol";
+import { useStore } from "../../store";
 import { useT } from "../../i18n";
 import { Overlay } from "../Overlay";
 
 type ScopeMode = AccessScopeState["mode"];
 
 // Per-project settings, reachable any time from the sidebar ⚙ (not just at
-// creation): the bound local folder and the read-scope override. The override
+// creation): the project description (injected into every session's agent
+// context), the bound local folder and the read-scope override. The override
 // lives in the main process settings.json; null means "follow the global
 // scope". Custom extra folders are a global list — shown read-only here.
-// 公有域项目没有本机文件夹/读取范围，只显示说明信息。
+// 公有域项目没有本机文件夹/读取范围，只显示说明信息；描述仅管理员可改。
 export function ProjectSettingsDialog({
   project,
   onClose,
@@ -18,12 +20,20 @@ export function ProjectSettingsDialog({
   onClose: () => void;
 }): React.JSX.Element {
   const isPublic = project.visibility === "public";
+  const role = useStore((s) => s.role);
+  const updateProjectDescription = useStore((s) => s.updateProjectDescription);
   // undefined = not queried yet; null = unbound on this machine.
   const [folder, setFolder] = useState<string | null | undefined>(undefined);
   const [choice, setChoice] = useState<"global" | ScopeMode>("global");
   const [globalMode, setGlobalMode] = useState<ScopeMode>("workspace");
   const [folders, setFolders] = useState<string[]>([]);
+  // 描述编辑（本地暂存，保存走 REST）。
+  const [desc, setDesc] = useState(project.description ?? "");
+  const [descBusy, setDescBusy] = useState(false);
+  const [descMsg, setDescMsg] = useState<null | "ok" | "fail">(null);
   const t = useT();
+
+  const canEditDesc = !isPublic || role === "admin";
 
   useEffect(() => {
     if (isPublic) return; // 公有域项目不查/不改本机绑定
@@ -65,6 +75,15 @@ export function ProjectSettingsDialog({
   const modeHint = (m: ScopeMode): string =>
     t(m === "workspace" ? "gen.modeWsHint" : m === "full" ? "gen.modeFullHint" : "gen.modeCustomHint");
 
+  const saveDescription = (): void => {
+    if (descBusy) return;
+    setDescBusy(true);
+    setDescMsg(null);
+    void updateProjectDescription(project.project_id, desc.trim())
+      .then((ok) => setDescMsg(ok ? "ok" : "fail"))
+      .finally(() => setDescBusy(false));
+  };
+
   return (
     <Overlay onClose={onClose}>
       <div className="dialog" style={{ minWidth: 380 }} onClick={(e) => e.stopPropagation()}>
@@ -73,6 +92,49 @@ export function ProjectSettingsDialog({
             ? t("pset.publicTitle", { name: project.name })
             : t("pset.title", { name: project.name })}
         </h2>
+
+        {/* 项目描述：随会话注入智能体上下文；个人/公域管理员可编辑，公域成员只读。 */}
+        <div className="field">
+          <label>{t("pset.descLabel")}</label>
+          {canEditDesc ? (
+            <>
+              <textarea
+                value={desc}
+                maxLength={500}
+                rows={3}
+                placeholder={t("pset.descPh")}
+                style={{ width: "100%", resize: "vertical" }}
+                onChange={(e) => {
+                  setDesc(e.target.value);
+                  setDescMsg(null);
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                <button style={{ fontSize: 12 }} disabled={descBusy} onClick={saveDescription}>
+                  {t("pset.descSave")}
+                </button>
+                {descMsg === "ok" && (
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("pset.descSaved")}</span>
+                )}
+                {descMsg === "fail" && (
+                  <span style={{ fontSize: 11, color: "var(--danger)" }}>{t("pset.descSaveFail")}</span>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                {t("pset.descHint")}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "pre-wrap" }}>
+                {project.description || t("pset.descNone")}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                {t("proj.descReadOnly")}
+              </div>
+            </>
+          )}
+        </div>
 
         {isPublic ? (
           <>

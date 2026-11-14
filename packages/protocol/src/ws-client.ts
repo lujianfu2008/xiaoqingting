@@ -16,6 +16,14 @@ export const WsInterrupt = z.object({
   session_id: z.string(),
 });
 
+// 重新生成：对会话里最后一条用户消息再跑一轮回复。不带文本——
+// 服务端从已落库历史里取原文重发（不追加新 user_text 块，历史
+// 不重复）；会话没有用户消息时服务端拒绝。
+export const WsRegenerate = z.object({
+  type: z.literal("regenerate"),
+  session_id: z.string(),
+});
+
 export const WsPermissionResponse = z.object({
   type: z.literal("permission_response"),
   request_id: z.string(),
@@ -44,6 +52,7 @@ export const WsPing = z.object({ type: z.literal("ping") });
 export const ClientMessage = z.discriminatedUnion("type", [
   WsUserMessage,
   WsInterrupt,
+  WsRegenerate,
   WsPermissionResponse,
   WsToolExecResult,
   WsPing,

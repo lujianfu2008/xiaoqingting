@@ -13,11 +13,14 @@ export function createSessionActions(
   | "loadSessions"
   | "selectSession"
   | "selectSharedSession"
+  | "fetchSessionHistory"
+  | "refreshOpenSessions"
   | "setSessionShare"
   | "listUsers"
   | "loadShared"
   | "ownerOnlineOf"
   | "deleteSession"
+  | "closeTab"
   | "moveSession"
   | "renameSession"
   | "setCurrentAgent"
@@ -38,6 +41,9 @@ export function createSessionActions(
       set((s) => ({
         sessions: [session, ...s.sessions],
         currentSessionId: session.session_id,
+        openTabs: s.openTabs.includes(session.session_id)
+          ? s.openTabs
+          : [...s.openTabs, session.session_id],
         blocksBySession: { ...s.blocksBySession, [session.session_id]: [] },
         streaming: { ...s.streaming, [session.session_id]: "" },
         busy: { ...s.busy, [session.session_id]: false },
@@ -46,6 +52,7 @@ export function createSessionActions(
       localStorage.setItem(LS.agentId, agentId);
       // Tell the main process which folder confines this session's local ops.
       void window.blm.setSessionProject(session.session_id, session.project_id ?? null);
+      get().setBrowserActiveSession(session.session_id);
     },
 
     async loadSessions() {
@@ -74,19 +81,58 @@ export function createSessionActions(
         get().stopSpeaking();
         get().setExpr("normal");
       }
-      const { serverUrl, token } = get();
-      const res = await fetch(`${apiBase(serverUrl)}/api/sessions/${id}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const blocks = res.ok ? ((await res.json()) as { blocks: Block[] }).blocks : [];
+      // 点过的会话进 tab（已开则原位保留，不抢焦点顺序）。
+      const openTabs = get().openTabs.includes(id)
+        ? get().openTabs
+        : [...get().openTabs, id];
+      const firstOpen = !get().blocksBySession[id];
+      // 先切焦点并立即用已有缓存渲染（tab 再点开是秒切，不转圈）；
+      // 首次打开才拉全量历史。
       set((s) => ({
         currentSessionId: id,
         sharedView: false,
-        blocksBySession: { ...s.blocksBySession, [id]: blocks },
-        streaming: { ...s.streaming, [id]: "" },
+        openTabs,
+        ...(firstOpen
+          ? {}
+          : { streaming: { ...s.streaming, [id]: "" } }),
       }));
+      // WS 在流式接收的会话：本地缓存持续是最新的，无需重拉；
+      // 非当前会话的历史也可能因对方发言/共享视图更新而落后，
+      // 但 tab 重开走的是增量推送，只有首次打开需要兜底全量。
+      // 断线窗口错过的消息由重连后的 refreshOpenSessions 兜底。
+      if (firstOpen) void get().fetchSessionHistory(id);
       const session = get().sessions.find((x) => x.session_id === id);
       void window.blm.setSessionProject(id, session?.project_id ?? null);
+      // 内置浏览器跟随 tab 焦点：显示本会话的页面（或收起）。
+      get().setBrowserActiveSession(id);
+    },
+
+    /** 拉取一个会话的全量历史替换本地缓存（服务端为权威）。失败保留现有
+     *  缓存并报错——绝不静默清空（token 失效时显示一片空白比报错更糟）。 */
+    async fetchSessionHistory(id) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/sessions/${id}/messages`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          set({ error: t("err.historyLoadFail") });
+          return;
+        }
+        const blocks = ((await res.json()) as { blocks: Block[] }).blocks;
+        set((s) => ({ blocksBySession: { ...s.blocksBySession, [id]: blocks } }));
+      } catch {
+        set({ error: t("err.historyLoadFail") });
+      }
+    },
+
+    /** 重连后补齐断线窗口里的消息：服务端对聊天只推不回放，错过只能重拉。
+     *  覆盖全部已打开会话（含共享视图——不走 selectSession，避免退出 sharedView）。 */
+    async refreshOpenSessions() {
+      const ids = new Set(get().openTabs);
+      const cur = get().currentSessionId;
+      if (cur) ids.add(cur);
+      await Promise.all([...ids].map((id) => get().fetchSessionHistory(id)));
     },
 
     /** View a session shared by another user (read-only). */
@@ -179,13 +225,48 @@ export function createSessionActions(
       void window.blm.forgetSession(id);
       set((s) => {
         const sessions = s.sessions.filter((x) => x.session_id !== id);
+        const openTabs = s.openTabs.filter((x) => x !== id);
+        const fallback = openTabs.find((x) => x !== id) ?? sessions[0]?.session_id ?? null;
         return {
           sessions,
-          currentSessionId:
-            currentSessionId === id ? (sessions[0]?.session_id ?? null) : currentSessionId,
+          openTabs,
+          attachments: { ...s.attachments, [id]: [] },
+          currentSessionId: currentSessionId === id ? fallback : currentSessionId,
           sharedView: currentSessionId === id ? false : s.sharedView,
         };
       });
+      // 浏览器页面按会话存：会话删除（或焦点落到别的 tab）时，
+      // 通知主进程按新焦点显示/收起页面。
+      const next = get().currentSessionId;
+      get().setBrowserActiveSession(next);
+    },
+
+    /** 关一个会话 tab（会话保留；关当前 tab 落到相邻 tab）。 */
+    closeTab(id) {
+      const { currentSessionId } = get();
+      set((s) => {
+        const idx = s.openTabs.indexOf(id);
+        if (idx === -1) return {};
+        const openTabs = s.openTabs.filter((x) => x !== id);
+        // 只在关的是当前 tab 时才换焦点；落在相邻 tab（先右后左）。
+        if (id !== currentSessionId) return { openTabs };
+        const next =
+          openTabs[Math.min(idx, openTabs.length - 1)] ?? null;
+        return {
+          openTabs,
+          currentSessionId: next,
+          sharedView: false,
+          // 换焦点即换会话上下文：朗读/表情归位。
+        };
+      });
+      if (id === currentSessionId) {
+        get().stopSpeaking();
+        get().setExpr("normal");
+        const next = get().currentSessionId;
+        if (next) void get().selectSession(next);
+        // 焦点移走（或没有 tab 了）：浏览器显示新 tab 的页面/收起。
+        get().setBrowserActiveSession(get().currentSessionId);
+      }
     },
 
     async moveSession(id, projectId) {

@@ -49,6 +49,32 @@ export interface VoiceSettings {
   wakeContinuousSecs: number; // 连续对话静默多少秒后退出（30/60/120）
 }
 
+/** 一条待发附件（按会话隔离；dataUrl 仅图片缩略图）。 */
+export interface SessionAttachment {
+  name: string;
+  path: string; // absolute path on this machine
+  dataUrl?: string;
+}
+
+/** 阅读器一个 tab：一个正在看的本机文件。 */
+export interface ViewerTab {
+  id: string;
+  path: string; // absolute path
+  name: string; // file name (tab label)
+  size: number; // bytes (0 = unknown)
+}
+
+/** 内置文件阅读器 pane 状态（多 tab，只读）。 */
+export interface ViewerState {
+  open: boolean;
+  tabs: ViewerTab[];
+  activeId: string | null;
+  /** 左侧文件浏览树当前根目录（跟随最近打开文件的目录）。 */
+  treeRoot: string | null;
+  /** 文件树折叠（▸ 竖条）；树右缘的宽度拖条随之隐藏。 */
+  treeCollapsed: boolean;
+}
+
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   ttsVoice: "",
   ttsRate: 0,
@@ -97,18 +123,26 @@ export interface BlmState {
   presence: Record<string, boolean>; // username -> online, seeded via REST + WS deltas
   currentSessionId: string | null;
   sharedView: boolean; // true while viewing someone else's shared session
+  // 打开的会话 tab（顺序即 tab 顺序；进入的会话自动成 tab）。
+  openTabs: string[];
   agents: AgentInfo[];
   currentAgentId: string;
+  // 附件随会话走（tab 并开时互不串）。附件确认键为会话 id。
+  attachments: Record<string, SessionAttachment[]>;
   blocksBySession: Record<string, Block[]>;
   streaming: Record<string, string>;
   busy: Record<string, boolean>;
   usageBySession: Record<string, Usage>; // 最近一次回复的 token 用量（result 推送）
+  // 草稿随会话走（tab 并开时互不串）；未选中会话时键为 ""。
+  draftsBySession: Record<string, string>;
   // 并发审批队列（FIFO，弹窗渲染队首）：子代理/主线程可能同时发起多个
   // 审批，单槽位会互相覆盖。result/error 到达时清空对应会话的队列。
   pendingPermission: WsPermissionRequest[];
   pendingExec: WsToolExecRequest[];
   trustMode: boolean;
   autoRead: boolean;
+  // 后台完成通知（回合完成/审批请求的系统通知；设置 → 常规可关）。
+  notifyEnabled: boolean;
   voiceSettings: VoiceSettings;
   speaking: boolean; // TTS is currently reading aloud
   recording: boolean; // microphone is recording (voice input)
@@ -128,6 +162,9 @@ export interface BlmState {
   myRelay: MyRelayStatus | null; // 网络中继：我的开关 + 管理员总开关 + 桌面在线
   adminRelayConfig: RelayConfigInfo | null; // 网络中继管理页（总开关+白名单+统计）
   browser: BrowserState; // built-in browser surface (embedded pane / popup)
+  viewer: ViewerState; // 内置文件阅读器（只读，多 tab）
+  // agent 读取文件时自动弹出阅读器（默认关；设置 → 常规）。
+  viewerAutoOpen: boolean;
 
   login(serverUrl: string, username: string, password: string): Promise<void>;
   register(
@@ -154,11 +191,14 @@ export interface BlmState {
   loadProjects(): Promise<void>;
   createProject(input: {
     name: string;
+    description?: string;
     agentId: string;
     folder: "auto" | "choose";
     visibility?: "personal" | "public";
   }): Promise<ProjectMeta | null>;
   deleteProject(id: string): Promise<void>;
+  /** 设置项目描述（个人=本人；公域=管理员）；空串 = 清空。 */
+  updateProjectDescription(id: string, description: string): Promise<boolean>;
   loadUpdateRequests(): Promise<void>;
   /** 批准/拒绝一条公有域更新申请（仅管理员）。 */
   decideUpdateRequest(id: string, approve: boolean, reason?: string): Promise<boolean>;
@@ -172,6 +212,8 @@ export interface BlmState {
     action: FlowAction,
     opts?: { target?: string; stageKey?: string; note?: string },
   ): Promise<boolean>;
+  /** 删除已完结的任务记录（需求方；含绑定会话已删的幽灵条目）。 */
+  deleteTask(taskId: string): Promise<void>;
   listAdminUsers(): Promise<AdminUserDetail[]>;
   setUserRole(username: string, role: "admin" | "reviewer" | "user"): Promise<boolean>;
   /** 授权/撤销某工号在公有域会话的服务端命令执行（仅管理员）。 */
@@ -189,6 +231,10 @@ export interface BlmState {
   loadAuditLog(limit?: number): Promise<boolean>;
   selectSession(id: string): Promise<void>;
   selectSharedSession(id: string): Promise<void>;
+  /** 拉取一个会话的全量历史替换本地缓存（服务端为权威；失败保留缓存并报错）。 */
+  fetchSessionHistory(id: string): Promise<void>;
+  /** 重连后逐个重拉已打开会话的历史（服务端不回放聊天，错过窗口只能重拉补齐）。 */
+  refreshOpenSessions(): Promise<void>;
   setSessionShare(id: string, shared: boolean, sharedWith?: string[], approvers?: string[]): Promise<void>;
   listUsers(): Promise<UserSummary[]>;
   loadShared(): Promise<void>;
@@ -251,18 +297,26 @@ export interface BlmState {
   /** 重命名自己的会话（空标题不提交；仅自己的会话可改）。 */
   renameSession(id: string, title: string): Promise<boolean>;
   setCurrentAgent(agentId: string): void;
-  /** 输入框草稿放 store：发送失败（ack 超时/断线）时能把文本放回去。 */
-  draft: string;
   setDraft(text: string): void;
   appendDraft(text: string): void;
+  /** 关闭一个会话 tab（不删会话；关当前 tab 时落到相邻 tab）。 */
+  closeTab(id: string): void;
   /** 发送一条用户消息；false = 未发出（断线），草稿保留。 */
   send(text: string): boolean;
+  /** 重新生成：对当前会话最后一条用户消息再跑一轮回复。 */
+  regenerate(): void;
   interrupt(): void;
   respondPermission(requestId: string, allow: boolean): void;
   respondExec(requestId: string, allow: boolean, trustFromNow: boolean): void;
   setTrustMode(on: boolean): void;
   setAutoRead(on: boolean): void;
+  /** 后台完成通知开关（localStorage 持久化，默认开）。 */
+  setNotifyEnabled(on: boolean): void;
   setRecording(on: boolean): void;
+  /** 添加待发附件（进当前会话的附件列表）。 */
+  addAttachments(items: SessionAttachment[]): void;
+  /** 移除当前会话的第 i 个待发附件。 */
+  removeAttachment(index: number): void;
   /** 语音唤醒配置/麦克风错误（null = 一切正常）。 */
   setWakeError(msg: string | null): void;
   /** 连续对话模式开/关（由唤醒编排与 ⏹ 逃生口设置）。 */
@@ -274,12 +328,28 @@ export interface BlmState {
   setAvatarVisible(on: boolean): void;
   updateVoiceSettings(patch: Partial<VoiceSettings>): void;
   initBrowser(): void;
+  /** Tab focus moved: main shows only that session's browser page. */
+  setBrowserActiveSession(sessionId: string | null): void;
   setBrowserMode(mode: "embedded" | "popup"): Promise<void>;
   closeBrowser(): Promise<void>;
+  // 内置文件阅读器（只读）。
+  /** 打开若干本机文件（按 path 去重；已开的直接激活）。 */
+  openViewerFiles(paths: string[]): void;
+  /** 关一个 tab（关最后 → pane 收起）。 */
+  closeViewerTab(id: string): void;
+  activateViewerTab(id: string): void;
+  /** 展开/收起 pane（无 tab 时不可凭空展开）。 */
+  setViewerOpen(on: boolean): void;
+  /** agent 读取文件时自动弹出阅读器（localStorage 持久化，默认关）。 */
+  setViewerAutoOpen(on: boolean): void;
+  /** 文件树折叠/展开（折叠时宽度拖条隐藏）。 */
+  setTreeCollapsed(on: boolean): void;
 }
 
 // Actions that never prompt again while trust mode is on (includes command
 // execution, per user request — trust mode means fully autonomous operation).
+// Work-dir/space settings are excluded on purpose: they are user-only
+// actions done in the settings UI, never auto-executable for the agent.
 export const TRUSTABLE_ACTIONS = new Set([
   "run_command",
   "read_file",
@@ -287,7 +357,6 @@ export const TRUSTABLE_ACTIONS = new Set([
   "write_file",
   "list_dir",
   "get_workdir",
-  "choose_workdir",
   "browser_open",
   "browser_navigate",
   "browser_snapshot",

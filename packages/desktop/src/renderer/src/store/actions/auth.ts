@@ -215,9 +215,16 @@ export function createAuthActions(
         presence: {},
         currentSessionId: null,
         sharedView: false,
+        openTabs: [],
+        attachments: {},
+        draftsBySession: {},
         blocksBySession: {},
         llmConfig: null,
+        viewer: { open: false, tabs: [], activeId: null, treeRoot: null, treeCollapsed: false },
       });
+      // 浏览器页面按会话存：退出登录丢掉所有页面，
+      // 别让上一个账号的页面留给下一个登录者。
+      void window.blm.browser.setActiveSession(null);
     },
   };
 }

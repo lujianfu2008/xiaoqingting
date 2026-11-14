@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
-// Mirrors main/browser.ts BrowserState (preload must not import main modules).
+// Mirrors main/browser/surfaces.ts BrowserState (preload must not
+// import main modules).
 interface BrowserState {
   mode: "embedded" | "popup";
   open: boolean;
   url: string;
   title: string;
+  /** The focused session this state describes. */
+  session_id: string;
 }
 
 // Mirrors main/executor/accessScope.ts accessScopeState().
@@ -49,6 +52,12 @@ contextBridge.exposeInMainWorld("blm", {
     ipcRenderer.on("blm:menu:open-settings", listener);
     return () => ipcRenderer.removeListener("blm:menu:open-settings", listener);
   },
+  // Fired when 应用菜单 → 文件 → 打开文件… is clicked.
+  onOpenFiles: (cb: () => void): (() => void) => {
+    const listener = (): void => cb();
+    ipcRenderer.on("blm:menu:open-files", listener);
+    return () => ipcRenderer.removeListener("blm:menu:open-files", listener);
+  },
   // Resolved UI language ("zh-CN" | "en"), for document.documentElement.lang.
   getLanguage: (): Promise<string> => ipcRenderer.invoke("blm:menu:getLanguage"),
   // In-app language switch: same persistence + broadcast as the native menu.
@@ -60,6 +69,26 @@ contextBridge.exposeInMainWorld("blm", {
   acquireLocalLogin: (employeeId: string, username: string): Promise<void> =>
     ipcRenderer.invoke("blm:login:acquire", { employee_id: employeeId, username }),
   releaseLocalLogin: (): Promise<void> => ipcRenderer.invoke("blm:login:release"),
+  // 自动更新：把所连服务器地址作为更新源交给主进程。
+  bindUpdater: (serverUrl: string): Promise<void> =>
+    ipcRenderer.invoke("blm:updater:bind", { server_url: serverUrl }),
+  checkUpdate: (): Promise<"up_to_date" | "available" | "error"> =>
+    ipcRenderer.invoke("blm:updater:check"),
+  // 自动更新下载进度（main 节流后推送；phase=idle 表示没有下载在进行）。
+  onUpdateProgress: (
+    cb: (s: {
+      phase: "idle" | "downloading" | "downloaded";
+      percent: number;
+      transferred?: number;
+      total?: number;
+      bytesPerSecond?: number;
+    }) => void,
+  ): (() => void) => {
+    const listener = (_e: unknown, s: unknown): void =>
+      cb(s as Parameters<typeof cb>[0]);
+    ipcRenderer.on("blm:updater:progress", listener);
+    return () => ipcRenderer.removeListener("blm:updater:progress", listener);
+  },
   // Fired when the language is switched in 应用菜单 → 语言.
   onLangChanged: (cb: (lang: string) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, lang: string): void => cb(lang);
@@ -84,6 +113,21 @@ contextBridge.exposeInMainWorld("blm", {
     req: { default_filename: string; markdown: string },
   ): Promise<{ saved: boolean; path: string | null; error?: string }> =>
     ipcRenderer.invoke("blm:chat:export", req),
+  // 内置文件阅读器（只读）：stat/列目录/读文本/打开对话框/系统打开。
+  viewer: {
+    stat: (path: string): Promise<unknown> =>
+      ipcRenderer.invoke("blm:viewer:stat", { path }),
+    listDir: (path: string): Promise<unknown> =>
+      ipcRenderer.invoke("blm:viewer:listDir", { path }),
+    read: (path: string): Promise<unknown> =>
+      ipcRenderer.invoke("blm:viewer:read", { path }),
+    openDialog: (): Promise<{ paths: string[] }> =>
+      ipcRenderer.invoke("blm:viewer:openDialog"),
+    popOut: (path: string): Promise<{ error?: string }> =>
+      ipcRenderer.invoke("blm:viewer:popOut", path),
+    openExternal: (path: string): Promise<{ error?: string }> =>
+      ipcRenderer.invoke("blm:viewer:openExternal", path),
+  },
   // Window-close behavior (✕ = quit or hide to tray).
   getPrefs: (): Promise<{ closeAction: "quit" | "tray" }> =>
     ipcRenderer.invoke("blm:app:getPrefs"),
@@ -128,6 +172,20 @@ contextBridge.exposeInMainWorld("blm", {
     return () => ipcRenderer.removeListener("blm:wake:detected", listener);
   },
   focusWindow: (): Promise<void> => ipcRenderer.invoke("blm:app:focus"),
+  // 后台完成通知：renderer 判定失焦+回合完成后调这里；主进程弹
+  // 系统通知，点击回传 blm:notify:activate 让 renderer 聚焦并跳会话。
+  notify: (args: { title: string; body?: string; session_id?: string }): Promise<void> =>
+    ipcRenderer.invoke("blm:notify:show", {
+      title: args.title,
+      body: args.body ?? "",
+      session_id: args.session_id ?? null,
+    }),
+  // 通知点击：主进程回推（带触发该通知的会话，null = 无会话）。
+  onNotifyActivate: (cb: (sessionId: string | null) => void): (() => void) => {
+    const listener = (_e: unknown, sessionId: string | null): void => cb(sessionId);
+    ipcRenderer.on("blm:notify:activate", listener);
+    return () => ipcRenderer.removeListener("blm:notify:activate", listener);
+  },
   // 网络中继：登录后下发 serverUrl+JWT（token 只存 main 内存），status 供
   // 设置面板展示本地连接状态与统计。
   relayConfigure: (
@@ -146,6 +204,9 @@ contextBridge.exposeInMainWorld("blm", {
   }> => ipcRenderer.invoke("blm:relay:status"),
   browser: {
     state: (): Promise<BrowserState> => ipcRenderer.invoke("blm:browser:state"),
+    // Which session tab is focused: main shows only that session's page.
+    setActiveSession: (sessionId: string | null): Promise<void> =>
+      ipcRenderer.invoke("blm:browser:activeSession", { session_id: sessionId }),
     setBounds: (rect: { x: number; y: number; width: number; height: number }): Promise<void> =>
       ipcRenderer.invoke("blm:browser:setBounds", rect),
     setMode: (mode: "embedded" | "popup"): Promise<BrowserState> =>

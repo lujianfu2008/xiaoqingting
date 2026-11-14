@@ -31,7 +31,18 @@ export function buildAppMenu(langSetting: Language): Menu {
   const template: MenuItemConstructorOptions[] = [
     {
       label: t.file,
-      submenu: [{ role: "quit", label: t.quit }],
+      submenu: [
+        {
+          label: t.openFiles,
+          click: (_mi, win) => {
+            // Electron types this as BaseWindow; only BrowserWindow has contents.
+            const w = win as import("electron").BrowserWindow | undefined;
+            if (windowAlive(w)) safeSend(w.webContents, "blm:menu:open-files");
+          },
+        },
+        { type: "separator" },
+        { role: "quit", label: t.quit },
+      ],
     },
     {
       label: t.edit,

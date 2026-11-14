@@ -19,12 +19,18 @@
 
 /* eye shapes per emotion */
 .dfly .eyeL, .dfly .eyeR { transition: transform 0.25s ease; }
+.dfly .lid-live, .dfly .lid-line { transition: transform 0.25s ease; }
 .dfly.ex-happy .eyeL, .dfly.ex-happy .eyeR { transform: scaleY(0.42); }
+/* happy 眯眼：眼皮一起压下来，睫毛线贴到眼球中线 */
+.dfly.ex-happy .lid-live, .dfly.ex-happy .lid-line { transform: translateY(15px); }
 .dfly.ex-sad .eyeL, .dfly.ex-sad .eyeR { transform: scaleY(0.62) translateY(2px); }
 .dfly.ex-surprised .eyeL, .dfly.ex-surprised .eyeR { transform: scale(1.1); }
+/* surprised 睁大：眼皮提上去，露出更多眼球 */
+.dfly.ex-surprised .lid-live, .dfly.ex-surprised .lid-line { transform: translateY(-6px); }
 .dfly.ex-curious { transform-box: view-box; transform-origin: 100px 100px; }
 .dfly.ex-curious .dfly-all { transform: rotate(4deg); }
 .dfly.ex-curious .eyeL { transform: scaleY(0.5); }
+.dfly.ex-curious .lidg-l .lid-live, .dfly.ex-curious .lidg-l .lid-line { transform: translateY(15px); }
 
 /* brows appear for sad / curious */
 .dfly .brow { opacity: 0; transition: opacity 0.2s ease; }
@@ -42,6 +48,6 @@
   flex-shrink: 0;
 }
 
-.status-dot.ok { background: #3ec46d; }
-.status-dot.warn { background: #e0b84c; }
+.status-dot.ok { background: var(--ok); }
+.status-dot.warn { background: var(--warn); }
 .status-dot.bad { background: var(--danger); }

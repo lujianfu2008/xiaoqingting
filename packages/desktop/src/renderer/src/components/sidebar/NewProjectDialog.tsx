@@ -15,6 +15,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }): React.JS
   const role = useStore((s) => s.role);
 
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [agentId, setAgentId] = useState(currentAgentId);
   const [folder, setFolder] = useState<"auto" | "choose">("auto");
   // 公有域项目：存服务端工作空间，全员可查；仅管理员可创建。
@@ -29,6 +30,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }): React.JS
     setBusy(true);
     const project = await createProject({
       name: name.trim(),
+      description,
       agentId,
       folder: isPublic ? "auto" : folder,
       visibility: isPublic ? "public" : "personal",
@@ -64,6 +66,21 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }): React.JS
               if (e.key === "Enter") void submit();
             }}
           />
+        </div>
+
+        <div className="field">
+          <label>{t("np.descLabel")}</label>
+          <textarea
+            value={description}
+            maxLength={500}
+            rows={3}
+            placeholder={t("np.descPh")}
+            style={{ width: "100%", resize: "vertical" }}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+            {t("np.descHint")}
+          </div>
         </div>
 
         <div className="field">
@@ -134,7 +151,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }): React.JS
         )}
 
         {err && (
-          <div style={{ color: "#e56", fontSize: 12, margin: "0 0 8px" }}>{err}</div>
+          <div style={{ color: "var(--danger)", fontSize: 12, margin: "0 0 8px" }}>{err}</div>
         )}
 
         <div className="actions">

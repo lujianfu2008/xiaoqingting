@@ -24,7 +24,6 @@ export const CLIENT_TOOL_NAMES = [
   "write_file",
   "list_dir",
   "get_workdir",
-  "choose_workdir",
   "browser_open",
   "browser_navigate",
   "browser_snapshot",

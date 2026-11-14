@@ -12,6 +12,7 @@ export const LANGUAGES: { id: Language; label: string }[] = [
 
 export interface MenuStrings {
   file: string;
+  openFiles: string;
   edit: string;
   view: string;
   window: string;
@@ -49,11 +50,17 @@ export interface MenuStrings {
   trayQuit: string;
   trayNotifyBody: string;
   browserTitle: string;
+  viewerTitle: string;
+  updateTitle: string;
+  updateFound: string; // {version}
+  updateInstall: string;
+  updateLater: string;
 }
 
 const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
   "zh-CN": {
     file: "文件",
+    openFiles: "打开文件…",
     edit: "编辑",
     view: "视图",
     window: "窗口",
@@ -90,9 +97,15 @@ const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
     trayQuit: "退出",
     trayNotifyBody: "已最小化到系统托盘，点击托盘图标恢复；菜单「文件 → 退出」真正退出。",
     browserTitle: "内置浏览器",
+    viewerTitle: "文件阅读器",
+    updateTitle: "发现新版本",
+    updateFound: "新版本 {version} 已下载完成，是否立即重启安装？",
+    updateInstall: "立即安装",
+    updateLater: "下次启动时",
   },
   en: {
     file: "File",
+    openFiles: "Open Files…",
     edit: "Edit",
     view: "View",
     window: "Window",
@@ -129,6 +142,11 @@ const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
     trayQuit: "Quit",
     trayNotifyBody: "Minimized to the system tray — click the tray icon to restore; File → Quit exits for real.",
     browserTitle: "Browser",
+    viewerTitle: "File viewer",
+    updateTitle: "Update available",
+    updateFound: "Version {version} has been downloaded. Restart and install now?",
+    updateInstall: "Install now",
+    updateLater: "On next launch",
   },
 } as const;
 

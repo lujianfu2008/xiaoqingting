@@ -7,7 +7,7 @@ import { useT } from "../../i18n";
 // Minimising folds the pane into a 34px rail that expands on click. Rendered
 // inline in panes that already have a toolbar (the browser bar) and floating in
 // the corner of the ones that do not (sidebar, chat).
-export type PaneId = "sidebar" | "browser" | "chat";
+export type PaneId = "sidebar" | "viewer" | "browser" | "chat";
 
 /** How the pane is currently expanded. Folded panes render no tools at all. */
 export type PaneState = "normal" | "max" | "full";

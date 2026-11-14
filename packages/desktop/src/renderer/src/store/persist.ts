@@ -10,11 +10,22 @@ export const LS = {
   agentId: "blm.agentId",
   trustMode: "blm.trustMode",
   autoRead: "blm.autoRead",
+  // 后台完成通知（设置 → 常规；缺省 = 开）。
+  notifyEnabled: "blm.notifyEnabled",
+  // agent 读取文件时自动弹出阅读器（设置 → 常规；缺省 = 关）。
+  viewerAutoOpen: "blm.viewerAutoOpen",
+  // 代码高亮主题（highlight.js 官方模板名；见 viewer/codeTheme.ts）。
+  codeTheme: "blm.codeTheme",
+  // 界面主题（见 theme/uiTheme.ts；缺省 = 墨蓝深色）。
+  uiTheme: "blm.uiTheme",
+  // 阅读器文件树宽度（px，树右缘拖条；缺省 = 200）。
+  vtreeWidth: "blm.vtreeWidth",
   avatarMode: "blm.avatarMode",
   voiceSettings: "blm.voiceSettings",
   // Pane widths dragged with the splitters (px).
   sidebarWidth: "blm.sidebarWidth",
   browserWidth: "blm.browserWidth",
+  viewerWidth: "blm.viewerWidth",
   // Chat pane: input-bar height (px) and message font size (px, Shift+wheel).
   inputHeight: "blm.inputHeight",
   chatFontSize: "blm.chatFontSize",

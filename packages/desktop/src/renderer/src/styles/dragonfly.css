@@ -22,9 +22,10 @@
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(76, 141, 255, 0.14);
-  border-color: rgba(76, 141, 255, 0.45);
-  color: #9dc0ff;
+  /* 按钮随主题 accent 走（形象本身的体色不随主题）。 */
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
   opacity: 0;
   transition: opacity 0.15s ease;
 }
@@ -86,16 +87,16 @@
   letter-spacing: 2px;
   text-align: center;
 }
-.dfly-status .lit { color: #7fd8ff; }
+.dfly-status .lit { color: color-mix(in srgb, var(--accent) 55%, var(--text)); }
 .dfly-stop {
-  background: rgba(127, 216, 255, 0.12);
-  border: 1px solid rgba(127, 216, 255, 0.5);
-  color: #7fd8ff;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
   border-radius: 999px;
   font-size: 12px;
   padding: 2px 12px;
   cursor: pointer;
   letter-spacing: 1px;
 }
-.dfly-stop:hover { background: rgba(127, 216, 255, 0.25); }
+.dfly-stop:hover { background: color-mix(in srgb, var(--accent) 25%, transparent); }
 

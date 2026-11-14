@@ -11,8 +11,9 @@ let tray: Tray | null = null;
 let hideNotified = false;
 
 /** Multi-size .ico ships via extraResources (packaged) or build/ (dev).
- *  Passing the path straight to Tray lets Windows pick the right size per DPI. */
-function trayIconPath(): string {
+ *  Passing the path straight to Tray lets Windows pick the right size per DPI.
+ *  Exported for the system-notification icon too. */
+export function trayIconPath(): string {
   return app.isPackaged
     ? path.join(process.resourcesPath, "icon.ico")
     : path.join(__dirname, "../../build/icon.ico");

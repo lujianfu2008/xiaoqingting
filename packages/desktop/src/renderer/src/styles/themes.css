@@ -1,0 +1,132 @@
+/* 界面主题：全部界面色收敛为 :root 上的 CSS 变量（见 base.css），
+   每个主题只覆写变量；其余样式一律 var() 引用。html[data-ui-theme]
+   由 uiTheme.ts 在启动时设置（localStorage 持久化，见设置 → 常规
+   → 界面主题），换主题 = 换属性值，全文档即时生效。
+
+   新增主题 = THEMES 加一行 + 下面加一段变量覆写。
+
+   半透明色用 color-mix 从变量派生（Electron 33/Chromium 130 支持），
+   避免每主题手抄 rgba。 */
+
+/* ---------- 默认：墨蓝深色（历史配色） ---------- */
+:root,
+html[data-ui-theme="midnight"] {
+  color-scheme: dark;
+  --bg: #101418;
+  --panel: #171c22;
+  --panel-2: #1e242c;
+  --border: #2a323c;
+  --text: #e6eaee;
+  --muted: #8b97a3;
+  --accent: #4c8dff;
+  --accent-2: #3a72d4;
+  --user-bubble: #2b4a75;
+  --danger: #e05d5d;
+  --warn: #e5a83a;
+  --ok: #4aa36a;
+  --info: #4aa3ff;
+  /* 弹层遮罩（dialogs.css）。 */
+  --overlay: rgba(0, 0, 0, 0.55);
+  /* 白色前景（按钮文字/录制点等，跟随主题深浅）。 */
+  --on-accent: #fff;
+}
+
+/* ---------- 曙光浅色 ---------- */
+html[data-ui-theme="daylight"] {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --panel-2: #eef0f3;
+  --border: #d4d9e0;
+  --text: #22262b;
+  --muted: #6a7480;
+  --accent: #3a72d4;
+  --accent-2: #2b5ab3;
+  --user-bubble: #d7e5f8;
+  --danger: #cc4444;
+  --warn: #b0781a;
+  --ok: #2e8a4f;
+  --info: #2d6fc4;
+  --overlay: rgba(20, 24, 30, 0.4);
+  --on-accent: #ffffff;
+}
+
+/* ---------- 森绿 ---------- */
+html[data-ui-theme="forest"] {
+  color-scheme: dark;
+  --bg: #0f1511;
+  --panel: #15201a;
+  --panel-2: #1c2922;
+  --border: #2c3a31;
+  --text: #e2ecdf;
+  --muted: #8aa08d;
+  --accent: #52b788;
+  --accent-2: #40916c;
+  --user-bubble: #2c4a38;
+  --danger: #d76d5d;
+  --warn: #d9a441;
+  --ok: #52b788;
+  --info: #6fb6ff;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --on-accent: #06130c;
+}
+
+/* ---------- 曜黑（纯中性黑 + 琥珀点缀） ---------- */
+html[data-ui-theme="onyx"] {
+  color-scheme: dark;
+  --bg: #0d0d0f;
+  --panel: #141417;
+  --panel-2: #1d1d21;
+  --border: #2e2e33;
+  --text: #ece9e2;
+  --muted: #97928a;
+  --accent: #e0a458;
+  --accent-2: #c9883c;
+  --user-bubble: #4a3d28;
+  --danger: #e06a5d;
+  --warn: #e0a458;
+  --ok: #7cae7a;
+  --info: #6fb6ff;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --on-accent: #141417;
+}
+
+/* ---------- 青雾（低饱和灰蓝，柔和不刺眼） ---------- */
+html[data-ui-theme="mist"] {
+  color-scheme: dark;
+  --bg: #131a1d;
+  --panel: #1a2327;
+  --panel-2: #222d32;
+  --border: #313d43;
+  --text: #dfe8ea;
+  --muted: #90a0a6;
+  --accent: #63b3c4;
+  --accent-2: #4c96a6;
+  --user-bubble: #2a4a52;
+  --danger: #d97a6a;
+  --warn: #d9a441;
+  --ok: #5fb385;
+  --info: #63b3c4;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --on-accent: #0a1417;
+}
+
+/* ---------- 樱粉浅色 ---------- */
+html[data-ui-theme="sakura"] {
+  color-scheme: light;
+  --bg: #faf6f7;
+  --panel: #ffffff;
+  --panel-2: #f6eef0;
+  --border: #e3d5d9;
+  --text: #322a2d;
+  --muted: #86767c;
+  --accent: #d96a9a;
+  --accent-2: #c05084;
+  --user-bubble: #f8d9e5;
+  --danger: #cc4444;
+  --warn: #b0781a;
+  --ok: #2e8a4f;
+  --info: #b05f92;
+  --overlay: rgba(40, 25, 30, 0.4);
+  --on-accent: #ffffff;
+}

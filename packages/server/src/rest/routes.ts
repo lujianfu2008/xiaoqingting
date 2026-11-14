@@ -14,6 +14,7 @@ import { registerSkillRoutes } from "./skillRoutes.js";
 import { registerWorkflowRoutes } from "./workflowRoutes.js";
 import { registerScheduleRoutes } from "./scheduleRoutes.js";
 import { registerRelayRoutes } from "./relayRoutes.js";
+import { registerDownloadRoutes } from "./downloadRoutes.js";
 
 // Composes the REST surface. Auth goes first because it also installs the JWT
 // onRequest hook that protects every route registered after it.
@@ -37,6 +38,8 @@ export function registerRoutes(
   registerWorkflowRoutes(app, manager);
   registerScheduleRoutes(app, manager, scheduler);
   registerRelayRoutes(app, manager);
+  // 更新包分发（/download/:file，白名单目录；免鉴权，登录前也能检查更新）。
+  registerDownloadRoutes(app);
 }
 
 // Fastify request augmentation

@@ -228,6 +228,43 @@ export class TaskManager {
     return this.listFor(userId).filter((t) => t.status !== "done");
   }
 
+  /**
+   * 发起方删除任务会话前的强制收尾：任意在途状态直接置 done+cancelled，
+   * 不走 flow 守卫（卡住/损坏的记录也必须能删线程），推 task_update 让
+   * 协作端工作台摘除条目。不写 flow_event（承载它的会话即将删除）。
+   * 任务记录保留（客户端列表降级灰显），与 done 后删线程一致。
+   */
+  forceFinish(taskId: string): TaskRecord | null {
+    const rec = this.store.getTask(taskId);
+    if (!rec) return null;
+    if (rec.status === "done") return rec;
+    rec.cancelled = true;
+    rec.current_stage = null;
+    rec.status = "done";
+    rec.updated_at = new Date().toISOString();
+    this.store.saveTask(rec);
+    this.notify(rec);
+    return rec;
+  }
+
+  /** 发起方删除已完结的任务记录（含绑定会话已删的幽灵条目）。
+   *  在途任务不可删——先取消/删除线程走 forceFinish。推
+   *  task_gone 让协作端列表摘除条目。 */
+  deleteTask(userId: string, taskId: string): "ok" | "not_found" | "forbidden" | "bad_status" {
+    const rec = this.store.getTask(taskId);
+    if (!rec) return "not_found";
+    if (rec.requester !== userId) return "forbidden";
+    if (rec.status !== "done") return "bad_status";
+    this.store.deleteTask(taskId);
+    const msg: ServerMessage = { type: "task_gone", task_id: taskId };
+    const people = new Set([
+      rec.requester,
+      ...rec.stages.map((s) => s.assignee).filter((u): u is string => !!u),
+    ]);
+    for (const u of people) this.conns.broadcast(u, msg);
+    return "ok";
+  }
+
   getTask(taskId: string): TaskRecord | null {
     return this.store.getTask(taskId);
   }

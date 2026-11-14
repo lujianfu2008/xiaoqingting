@@ -79,6 +79,12 @@ export function handleConnection(
     send({ type: "task_update", task });
   }
 
+  // 在跑会话的忙闲补推：共享会话由别人驱动时，重连/后进来的
+  // 协作者也能看到忙碌状态（空闲会话不推，busy=false 无需播种）。
+  for (const msg of manager.busyTurnStatesFor(payload.uid)) {
+    send(msg);
+  }
+
   socket.on("message", (raw: unknown) => {
     let parsed: unknown;
     try {
@@ -100,6 +106,9 @@ export function handleConnection(
         break;
       case "interrupt":
         manager.handleInterrupt(payload.uid, msg.data.session_id);
+        break;
+      case "regenerate":
+        manager.handleRegenerate(payload.uid, msg.data.session_id);
         break;
       case "permission_response":
         manager.handlePermissionResponse(payload.uid, msg.data.request_id, msg.data.allow);

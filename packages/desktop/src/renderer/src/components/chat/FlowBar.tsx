@@ -27,14 +27,14 @@ function StageChain({ task }: { task: TaskView }): React.JSX.Element {
         fontSize: 11,
         padding: "1px 8px",
         borderRadius: 999,
-        border: `1px solid ${state === "active" ? "#4aa3ff" : "var(--border, #444)"}`,
+        border: `1px solid ${state === "active" ? "var(--info)" : "var(--border, #444)"}`,
         background:
           state === "active"
             ? "rgba(74,163,255,.15)"
             : state === "done"
               ? "rgba(74,163,255,.08)"
               : "transparent",
-        color: state === "todo" ? "var(--muted)" : state === "active" ? "#4aa3ff" : "var(--muted)",
+        color: state === "todo" ? "var(--muted)" : state === "active" ? "var(--info)" : "var(--muted)",
         whiteSpace: "nowrap",
       }}
     >
@@ -244,7 +244,7 @@ export function FlowBar({ task }: { task: TaskView }): React.JSX.Element {
       {/* 当前负责人离线：执行面（本机执行/审批/发言推进）跟随负责人，
           他离线时线程无法推进——需求方本人仍可旁观与发言。 */}
       {!executorOnline && active && (
-        <div style={{ fontSize: 11, color: "#e5a83a" }}>
+        <div style={{ fontSize: 11, color: "var(--warn)" }}>
           ⚠ {t("task.executorOffline")}
         </div>
       )}

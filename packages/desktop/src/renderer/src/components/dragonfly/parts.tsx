@@ -9,6 +9,11 @@ export function DragonflyDefs(): React.JSX.Element {
         <stop offset="48%" stopColor="#2e9fd8" />
         <stop offset="100%" stopColor="#0a3f63" />
       </radialGradient>
+      {/* eyelid — 蜻蜓本没有眼皮，这块绿色"皮肤"是拟人的 */}
+      <linearGradient id="dx-lid" gradientUnits="userSpaceOnUse" x1="0" y1="24" x2="0" y2="44">
+        <stop offset="0%" stopColor="#2fbf6a" />
+        <stop offset="100%" stopColor="#1b8f4f" />
+      </linearGradient>
       <linearGradient id="dx-wing" x1="100%" y1="0%" x2="0%" y2="60%">
         <stop offset="0%" stopColor="rgba(160,230,255,0.08)" />
         <stop offset="55%" stopColor="rgba(140,220,255,0.36)" />

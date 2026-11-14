@@ -42,7 +42,6 @@ export const WsToolExecRequest = z.object({
     "write_file",
     "list_dir",
     "get_workdir",
-    "choose_workdir",
     "browser_open",
     "browser_navigate",
     "browser_snapshot",
@@ -83,6 +82,16 @@ export const WsSessionCreated = z.object({
 
 export const WsPong = z.object({ type: z.literal("pong") });
 
+// 服务端权威的回合忙闲状态：忙闲翻转时推给主人与共享可见用户，
+// 连接建立时对在跑会话补推。共享会话的引擎由别人驱动时，协作者
+// 据此显示忙碌（数字人思考/侧栏橙点）——引擎忙不忙只有服务端知道。
+export const WsTurnState = z.object({
+  type: z.literal("turn_state"),
+  session_id: z.string(),
+  busy: z.boolean(),
+});
+export type WsTurnState = z.infer<typeof WsTurnState>;
+
 // Someone came online / went offline — drives the presence dots in the
 // shared-session list and the share-target picker.
 export const WsPresence = z.object({
@@ -118,6 +127,13 @@ export const WsTaskUpdate = z.object({
 });
 export type WsTaskUpdate = z.infer<typeof WsTaskUpdate>;
 
+// 任务记录删除：推给任务相关人，客户端摘除列表条目。
+export const WsTaskGone = z.object({
+  type: z.literal("task_gone"),
+  task_id: z.string(),
+});
+export type WsTaskGone = z.infer<typeof WsTaskGone>;
+
 // 定时任务变更（定义在 schedules.js，经 index.ts 桶导出）：推给任务主人，
 // 连接建立后靠 REST 播种收敛，与 task_update 同构。
 
@@ -131,10 +147,12 @@ export const ServerMessage = z.discriminatedUnion("type", [
   WsSessionCreated,
   WsPresence,
   WsPong,
+  WsTurnState,
   WsUpdateRequest,
   WsUpdateRequestDecided,
   WsReviewRequest,
   WsTaskUpdate,
+  WsTaskGone,
   WsScheduleUpdate,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;

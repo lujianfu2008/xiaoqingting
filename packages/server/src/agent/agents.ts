@@ -54,7 +54,7 @@ const safeOpsPrompt =
 const localOpsPrompt =
   "你的名字叫「小蜻蜓」。" +
   "你的所有工具操作（命令执行、文件读写、浏览网页）都在用户的电脑上直接执行，" +
-  "文件路径基于用户电脑上设定的工作目录（可用 get_workdir 工具查询，用户要求更改时用 choose_workdir）。" +
+  "文件路径基于用户电脑上设定的工作目录（可用 get_workdir 工具查询）。" +
   "浏览或搜索网页时必须使用 browser_open / browser_navigate / browser_snapshot 工具。" +
   "用户消息里形如 [附件] 名称 → 路径 的行表示随消息附上的文件（路径照抄附件行）。" +
   "需要查看任何图片的内容（附件里的图、工作目录里的图都一样）时，必须用 read_attachment 工具；read_file 只能读文本文件，对图片只会输出乱码，绝不要用 read_file 或命令行去\"读\"图片。" +
@@ -63,6 +63,7 @@ const localOpsPrompt =
   "严禁向用户透露任何服务器内部路径、系统目录或引擎信息；" +
   "被问到「工作目录」时，永远用 get_workdir 查询用户电脑上的实际目录来回答，绝不要编造或透露其他路径。" +
   safeOpsPrompt +
+  "工作目录、项目空间及其访问权限只能由用户本人在界面里设置，你没有任何更改它们的工具：被问到这类设置时，指引他去设置界面操作，绝不要试图借命令（如改配置文件）间接更改。" +
   "每次回复的最后单独一行输出一个情绪标记，格式为 [情绪:值]，可用值：开心|难过|惊讶|疑惑|严肃|普通。" +
   "标记必须与回复内容的情绪一致（如讲了笑话用开心，道歉或告知坏消息用难过），无特别情绪时用普通。" +
   "标记是给界面用的，除此之外不要在任何地方解释它。";
@@ -243,6 +244,32 @@ export function toPublicRole(role: AgentRole, withExec = false): AgentRole {
     ],
     disallowedTools: [...serverSideTools, ...clientTools],
     permissionMode: "default",
+  };
+}
+
+/**
+ * 把项目描述拼进角色 append 尾部（克隆，不改入参）。必须在对角色
+ * 的一切字面替换变换（withSubagents / toPublicRole）之后调用：append
+ * 尾部不在 localOpsPrompt / delegationGuidance 锚点内，不干扰那些
+ * 替换；个人/公域会话因此都能生效。
+ */
+export function withProjectContext(role: AgentRole, description: string): AgentRole {
+  const sys = role.systemPrompt as {
+    type: "preset";
+    preset: "claude_code";
+    append: string;
+  };
+  const projectContext =
+    "\n以下是本项目的工作空间说明（由项目所有者维护，描述这个空间的身份与用途）：\n" +
+    description +
+    "\n以上是背景参考：如说明与用户的当前要求冲突，以用户当前要求为准。";
+  return {
+    ...role,
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: sys.append + projectContext,
+    },
   };
 }
 

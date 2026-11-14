@@ -1,4 +1,7 @@
+/* 界面色变量由 themes.css 提供（html[data-ui-theme] 切换，
+   见 components/theme/uiTheme.ts 与 设置 → 常规）。 */
 :root {
+  /* 主题模块加载前的兜底（与默认主题一致），避免闪白。 */
   color-scheme: dark;
   --bg: #101418;
   --panel: #171c22;
@@ -10,6 +13,11 @@
   --accent-2: #3a72d4;
   --user-bubble: #2b4a75;
   --danger: #e05d5d;
+  --warn: #e5a83a;
+  --ok: #4aa36a;
+  --info: #4aa3ff;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --on-accent: #fff;
 }
 
 * {
@@ -46,7 +54,7 @@ button:hover {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 button.primary:hover {

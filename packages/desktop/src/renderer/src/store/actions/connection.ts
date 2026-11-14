@@ -84,13 +84,15 @@ export function createConnectionActions(
         // Sessions live inside project/default spaces and are created
         // explicitly — reconnecting just reloads what exists.
         void get().loadSessions().catch(() => undefined);
-        // 断线期间的输出已落库：重连后重拉当前会话补齐历史，并复位可能
-        // 卡死的 busy（result 恰好在断线窗口里送达时没人清它）。
+        // 断线期间的输出已落库，但服务端对聊天只推不回放：错过窗口里的消息
+        // 必须重拉历史补齐，并复位可能卡死的 busy（result 恰好在断线窗口里
+        // 送达时没人清它）。
         const sid = get().currentSessionId;
         if (sid) {
           set((s) => ({ busy: { ...s.busy, [sid]: false } }));
-          // 共享视图保持只读跟进，不重拉（selectSession 会退出 sharedView）。
-          if (!get().sharedView) void get().selectSession(sid).catch(() => undefined);
+          // 覆盖所有已打开会话（含共享视图——不走 selectSession，避免退出
+          // sharedView）；正在流式接收的会话重拉后流式残影一并清掉。
+          void get().refreshOpenSessions();
         }
         void get().loadProjects().catch(() => undefined);
         // 协作流任务：REST 播种（WS 补推与其幂等）。

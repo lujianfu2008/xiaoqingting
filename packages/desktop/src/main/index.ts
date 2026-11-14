@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, Notification } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { executeLocal } from "./executor";
@@ -26,10 +26,16 @@ import { configureWake, feedWakeChunk, stopWakeStream } from "./wake";
 import { applyAppMenu, setLanguage } from "./menu";
 import { resolveLanguage } from "./i18n";
 import { currentLanguage } from "./menu";
-import { closeToTray, destroyTray } from "./tray";
+import { closeToTray, destroyTray, trayIconPath } from "./tray";
+import { bindUpdater, checkNow } from "./updater";
 import { acquireLogin, isAccountLocked, releaseLogin } from "./loginLock";
 import { loadSettings, patchSettings, type CloseAction } from "./settings";
+import { safeSend } from "./safeSend";
 import * as browser from "./browser";
+import { registerViewerIpc, registerViewerPrivileges } from "./viewer";
+
+// viewer:// 自定义协议的 privileges 必须在 app ready 前注册。
+registerViewerPrivileges();
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -67,7 +73,7 @@ function createWindow(): void {
   browser.registerHost(win);
   // Re-dock the browser view when the window resizes under it.
   win.on("resize", () => browser.relayout(win));
-  win.on("closed", () => browser.close());
+  win.on("closed", () => browser.shutdown());
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -81,6 +87,9 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // Required on Windows for Notification toasts (托盘最小化提示).
   app.setAppUserModelId("com.xiaoqingting.desktop");
+
+  // 内置文件阅读器：viewer:// 协议 handler + 只读 IPC 通道。
+  registerViewerIpc();
 
   // Localized application menu (语言 switcher rebuilds it live).
   applyAppMenu();
@@ -138,7 +147,11 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle("blm:session:forget", (_e, args: { session_id: string }) => {
-    if (args && typeof args.session_id === "string") forgetSession(args.session_id);
+    if (args && typeof args.session_id === "string") {
+      forgetSession(args.session_id);
+      // 会话删除时其内置浏览器页面一并丢弃（页面按会话存）。
+      browser.forgetSession(args.session_id);
+    }
   });
   // Attachments: clipboard/pasted files are saved from the renderer into the
   // per-session attachment store; preview returns a small thumbnail dataURL.
@@ -299,9 +312,20 @@ app.whenReady().then(() => {
   ipcMain.handle("blm:tts:stop", () => stopSpeaking());
   ipcMain.handle("blm:tts:voices", () => listVoices());
 
-  // Built-in browser: the renderer reports the pane rect for the embedded
-  // WebContentsView and can switch between embedded / popup rendering.
+  // Built-in browser: the renderer reports the pane rect for the
+  // focused session's WebContentsView and which tab is focused
+  // (pages are per-session); it can also switch embedded / popup.
   ipcMain.handle("blm:browser:state", () => browser.state());
+  ipcMain.handle(
+    "blm:browser:activeSession",
+    (_e, args: { session_id?: string | null }) => {
+      browser.setActiveSession(
+        args && typeof args.session_id === "string" && args.session_id
+          ? args.session_id
+          : null,
+      );
+    },
+  );
   ipcMain.handle(
     "blm:browser:setBounds",
     (event, rect: { x: number; y: number; width: number; height: number }) => {
@@ -319,7 +343,7 @@ app.whenReady().then(() => {
     if (!win || typeof url !== "string") return { ok: false, error: "无效请求" };
     return browser.open(win, url);
   });
-  ipcMain.handle("blm:browser:close", () => browser.close());
+  ipcMain.handle("blm:browser:close", () => browser.closeFocused());
 
   // Local offline ASR: renderer sends 16kHz mono int16 PCM from the mic;
   // recognition runs in a standalone-Node child process (see asr.ts).
@@ -344,6 +368,49 @@ app.whenReady().then(() => {
       return configureWake(words, sensitivity);
     },
   );
+
+  // 后台完成通知（renderer 判定失焦后请求）：弹系统通知，点击聚焦
+  // 窗口并回传会话 id，renderer 负责跳会话。通知对象在点击/关闭后
+  // 即可释放，无需长期持有。
+  ipcMain.handle(
+    "blm:notify:show",
+    (event, args: { title?: unknown; body?: unknown; session_id?: unknown }) => {
+      if (!args || typeof args.title !== "string" || !args.title.trim()) {
+        return;
+      }
+      const sessionId =
+        typeof args.session_id === "string" && args.session_id ? args.session_id : null;
+      const body = typeof args.body === "string" ? args.body : "";
+      const senderWc = event.sender;
+      const n = new Notification({
+        title: args.title.slice(0, 120),
+        body: body.slice(0, 200),
+        icon: trayIconPath(),
+      });
+      n.on("click", () => {
+        const win = BrowserWindow.getAllWindows().find(
+          (w) => w.webContents === senderWc,
+        );
+        if (win) {
+          if (win.isMinimized()) win.restore();
+          win.show();
+          win.focus();
+        }
+        safeSend(senderWc, "blm:notify:activate", sessionId);
+      });
+      n.show();
+    },
+  );
+  // 自动更新：renderer 登录后把服务器地址传进来绑定更新源；
+  // 设置面板「检查更新」手动触发一次重查。
+  ipcMain.handle(
+    "blm:updater:bind",
+    (_e, args: { server_url?: unknown }) => {
+      if (!args || typeof args.server_url !== "string" || !args.server_url.trim()) return;
+      bindUpdater(args.server_url);
+    },
+  );
+  ipcMain.handle("blm:updater:check", () => checkNow());
   ipcMain.on("blm:wake:chunk", (event, pcm: ArrayBuffer) => {
     if (pcm instanceof ArrayBuffer) feedWakeChunk(pcm, event.sender);
   });

@@ -9,7 +9,8 @@ import { FILE_TIMEOUT_MS, textResult, type RunAction } from "./clientTools/share
 // 公有域项目（共有知识库）的服务端执行器：与 clientTools 同名的文件工具，
 // 但直接在服务器的公有工作空间（data/public-projects/<projectId>/）执行，
 // 而不是转发到用户电脑。路径以工作空间根为界做围栏；任何输出都只用逻辑
-// 路径，绝不暴露服务器绝对路径。不提供 browser / choose_workdir。
+// 路径，绝不暴露服务器绝对路径。不提供 browser；工作目录等空间设置不是
+// 智能体工具（用户在界面里改）。
 // run_command 仅对被授权的工号可用（publicExecAuth.ts），在服务端执行。
 
 export const PUBLIC_WORKSPACE_CONTENT_MAX = 2_000_000;
