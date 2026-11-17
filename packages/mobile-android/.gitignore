@@ -1,0 +1,12 @@
+# 构建产物
+.gradle/
+build/
+app/build/
+local.properties
+
+# renderer 产物由 copy-renderer 任务从 packages/desktop 同步
+app/src/main/assets/renderer/
+
+# 签名 key（见 KEYSTORE.md）
+*.keystore
+*.jks

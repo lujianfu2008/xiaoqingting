@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 允许 cleartext http：登录页默认 http://localhost:8788，
+     大量用户是内网 http 服务器（与桌面现状一致）。
+     生产 HTTPS 服务器不受影响。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
