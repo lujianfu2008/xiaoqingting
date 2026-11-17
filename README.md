@@ -129,7 +129,9 @@ npm run build        # 全包构建
 
 ## 🗺️ Roadmap（近期）
 
+- [x] Android 客户端（WebView 壳装载同一 renderer；聊天/审批先行，语音/文件/执行器逐里程碑补齐）
 - [ ] Linux/macOS 离线 ASR 支持（sherpa-onnx 跨平台）
+- [ ] 鸿蒙（HarmonyOS NEXT）客户端
 - [ ] 插件市场：技能包一键安装/更新/评分
 - [ ] 企业版：审计日志、RBAC、私有化部署脚本
 - [ ] 自建博客（Hugo + GitHub Pages）→ 海外 AdSense 长尾
