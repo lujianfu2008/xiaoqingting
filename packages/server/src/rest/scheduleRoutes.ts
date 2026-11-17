@@ -37,7 +37,7 @@ export function registerScheduleRoutes(
   manager: AgentManager,
   scheduler: ScheduleScheduler,
 ): void {
-  void manager; // 与其他 register* 同签名；触发走 scheduler（内部持 manager）
+  // manager 用于归属校验（validateScheduleProject）；触发走 scheduler（内部持 manager）。
 
   app.get("/api/schedules", (req) => ({ schedules: listSchedules(req.userId) }));
 
@@ -47,6 +47,12 @@ export function registerScheduleRoutes(
     if (!agentValid(parsed.data.agent_id)) return reply.code(400).send({ error: "invalid_agent" });
     if (scheduleNameTaken(req.userId, parsed.data.name)) {
       return reply.code(400).send({ error: "name_taken" });
+    }
+    // 归属项目（可选）：须存在、本人可用且为定时任务项目。
+    const projectId = parsed.data.project_id ?? null;
+    if (projectId) {
+      const v = manager.validateScheduleProject(req.userId, projectId);
+      if (!v.ok) return reply.code(400).send({ error: "bad_project" });
     }
     const now = new Date();
     const rec: ScheduleRecord = {
@@ -58,6 +64,7 @@ export function registerScheduleRoutes(
       time: parsed.data.time,
       enabled: parsed.data.enabled ?? true,
       session_id: null, // 首触自动建专属会话
+      ...(projectId ? { project_id: projectId } : {}),
       created_at: now.toISOString(),
       updated_at: now.toISOString(),
       // once 时间已过不拒绝：首 tick 命中后在线补跑一轮 / 离线记错过停用。
@@ -83,6 +90,11 @@ export function registerScheduleRoutes(
     if (scheduleNameTaken(req.userId, parsed.data.name, id)) {
       return reply.code(400).send({ error: "name_taken" });
     }
+    const projectId = parsed.data.project_id ?? null;
+    if (projectId) {
+      const v = manager.validateScheduleProject(req.userId, projectId);
+      if (!v.ok) return reply.code(400).send({ error: "bad_project" });
+    }
     const now = new Date();
     const next: ScheduleRecord = {
       ...rec,
@@ -91,6 +103,7 @@ export function registerScheduleRoutes(
       agent_id: parsed.data.agent_id,
       time: parsed.data.time,
       enabled: parsed.data.enabled,
+      ...(projectId ? { project_id: projectId } : { project_id: null }),
       updated_at: now.toISOString(),
       // 编辑即重排计划（once 重挂回 at；停用状态保持 null）。
       next_run_at: parsed.data.enabled ? nextRunAt(parsed.data.time, now, rec.created_at) : null,
@@ -128,6 +141,10 @@ export function registerScheduleRoutes(
 
   app.delete("/api/schedules/:id", (req, reply) => {
     const id = (req.params as { id: string }).id;
+    const rec = getSchedule(req.userId, id);
+    if (!rec) return reply.code(404).send({ error: "not_found" });
+    // 级联删专属会话（宿主任务没了，运行记录一起收走；历史文件同删）。
+    if (rec.session_id) manager.deleteSession(rec.owner, rec.session_id);
     if (!deleteSchedule(req.userId, id)) return reply.code(404).send({ error: "not_found" });
     // 不推送：操作端 204 后本地移除，其余端靠 onopen REST 播种收敛（同 sessions delete）。
     return reply.code(204).send();

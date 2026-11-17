@@ -300,6 +300,12 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       set((s) => ({ presence: { ...s.presence, [msg.user_id]: msg.online } }));
       break;
 
+    case "diag_request":
+      // 显示诊断：采集布局摘要（+ 允许时的截图）回服务端。
+      // 不弹窗不提示——摘要纯几何数字；截图有独立开关把关。
+      void get().collectDiag(msg.request_id, msg.scope);
+      break;
+
     case "pong":
       break;
   }

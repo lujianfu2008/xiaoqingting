@@ -4,6 +4,9 @@ import {
   AdminUserDetail,
   AdminUsersResponse,
   AdminResetPasswordRequest,
+  DiagCollectRequest,
+  DiagDetailResponse,
+  DiagListResponse,
   DisabledUpdateRequest,
   PublicExecToggleRequest,
   ReviewDecisionRequest,
@@ -12,6 +15,12 @@ import {
 import type { AuditEntry } from "@blm/protocol";
 import type { AgentManager } from "../agent/AgentManager.js";
 import { appendAudit, readRecentAudit } from "../audit.js";
+import {
+  DiagTaskStartRequest,
+  DiagTaskStartResponse,
+  DiagTaskListResponse,
+  DiagTaskDetailResponse,
+} from "@blm/protocol";
 import {
   listUsers,
   getEmployeeId,
@@ -25,6 +34,7 @@ import {
   resetPassword,
 } from "../users.js";
 import { isPublicExecAuthorized, setPublicExecAuthorized } from "../publicExecAuth.js";
+import { listDiagEntries, readDiagEntry, nextDiagId } from "../diagStore.js";
 
 // 管理员专用：用户管理（公有域管理员授权、审核员授权、账号禁用/启用）。
 // 注册审核端点（/api/review/*）对管理员和管理员授权的审核员（reviewer）开放。
@@ -148,6 +158,109 @@ export function registerAdminRoutes(app: FastifyInstance, manager: AgentManager)
     manager.kickUser(username);
     appendAudit({ actor: req.userId, action: "user.kick", target: username });
     return { username, kicked: true };
+  });
+
+  // ---------- 显示诊断（仅管理员） ----------
+
+  // 发起一次采集：目标用户须在线（WS 推 diag_request），
+  // 客户端自愿回 diag_result（用户侧设置里可关闭自动回传）。
+  app.post("/api/admin/diag/:username", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const parsed = DiagCollectRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const username = (req.params as { username: string }).username;
+    if (!getUserRecord(username)) return reply.code(404).send({ error: "not_found" });
+    if (!manager.isOnline(username)) {
+      return reply.code(409).send({ error: "user_offline" });
+    }
+    const id = nextDiagId();
+    manager.sendDiagRequest(username, id, parsed.data.scope);
+    appendAudit({
+      actor: req.userId,
+      action: "diag.collect",
+      target: username,
+      detail: { scope: parsed.data.scope },
+    });
+    return { request_id: id, scope: parsed.data.scope };
+  });
+
+  // 结果清单（最新在前）。
+  app.get("/api/admin/diag", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const body: DiagListResponse = { entries: listDiagEntries() };
+    return body;
+  });
+
+  // 单条详情（布局摘要 + 可选截图 base64）。
+  app.get("/api/admin/diag/:id", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const id = (req.params as { id: string }).id;
+    const e = readDiagEntry(id);
+    if (!e) return reply.code(404).send({ error: "not_found" });
+    const body: DiagDetailResponse = {
+      layout: e.layout ?? null,
+      screenshot: e.screenshot ?? null,
+    };
+    return body;
+  });
+
+  // ---------- 远程诊断任务（借用在线客户端的智能体排障） ----------
+
+  // 发起：目标用户须在线。会话归属目标用户（其 LLM/其本机工具面），
+  // 管理员只拿落存档的报告，不进会话。提示词按模板生成。
+  app.post("/api/admin/diag-task/:username", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const parsed = DiagTaskStartRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const username = (req.params as { username: string }).username;
+    if (!getUserRecord(username)) return reply.code(404).send({ error: "not_found" });
+    const r = manager.diagTasks.start(req.userId, username, parsed.data.kind);
+    if (!r.ok) {
+      return reply.code(r.code === "user_offline" ? 409 : 400).send({ error: r.code });
+    }
+    appendAudit({
+      actor: req.userId,
+      action: "diag.task_start",
+      target: username,
+      detail: { kind: parsed.data.kind, session_id: r.session_id },
+    });
+    const body: DiagTaskStartResponse = {
+      task_id: r.task_id,
+      session_id: r.session_id,
+    };
+    return body;
+  });
+
+  // 任务清单（最新在前）。
+  app.get("/api/admin/diag-task", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    manager.diagTasks.sweepStale();
+    const body: DiagTaskListResponse = { entries: manager.diagTasks.list() };
+    return body;
+  });
+
+  // 单条详情（状态 + 报告全文）。
+  app.get("/api/admin/diag-task/:id", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const id = (req.params as { id: string }).id;
+    const d = manager.diagTasks.detail(id);
+    if (!d) return reply.code(404).send({ error: "not_found" });
+    const body: DiagTaskDetailResponse = {
+      entry: d.entry,
+      report: d.report,
+    };
+    return body;
+  });
+
+  // 删除任务记录与专属会话（报告看完即弃；会话是任务专属产物）。
+  app.delete("/api/admin/diag-task/:id", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const id = (req.params as { id: string }).id;
+    const d = manager.diagTasks.detail(id);
+    if (!d) return reply.code(404).send({ error: "not_found" });
+    const r = manager.diagTasks.delete(id, d.entry.username);
+    if (r !== "ok") return reply.code(400).send({ error: r });
+    return { ok: true };
   });
 
   // ---------- 注册审核（管理员 + 其授权的审核员） ----------

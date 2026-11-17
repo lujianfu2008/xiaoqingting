@@ -272,9 +272,16 @@ body.resizing {
   background: var(--panel-2);
 }
 
+/* 选中态：主题色淡底 + 左侧色条，与悬停的灰底拉开层次；
+   色从 --accent 派生（color-mix），六个主题自适应。 */
 .session-item.active {
-  background: var(--panel-2);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.session-item.active:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 /* 会话行/任务行的忙碌小红点（与 tab 的 tab-busy-dot 同款）。 */
@@ -307,6 +314,31 @@ body.resizing {
 
 .session-item .del:hover {
   color: var(--danger);
+}
+
+/* 项目组头按钮（箭头/文件夹/⚙/＋/✕）：与会话行同款——悬停才现，
+   默认只留项目名，列表更安静。 */
+.project-group-head .del {
+  visibility: hidden;
+  border: none;
+  background: none;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.project-group-head:hover .del {
+  visibility: visible;
+}
+
+.project-group-head .del:hover {
+  color: var(--text);
+}
+
+/* 展开箭头例外：常显（收起的组必须有可见的展开入口）。 */
+.project-group-head .del.always {
+  visibility: visible;
+  padding: 0 2px;
+  font-size: 10px;
 }
 
 .admin-badge {
@@ -470,7 +502,7 @@ body.resizing {
   opacity: 0.75;
 }
 
-/* bar 上的小按钮（弹窗 / ✕ 关闭整个阅读器），样式贴 .browser-btn。 */
+/* bar 上的小按钮（弹窗 / ✕ 关闭全部标签并收起阅读器），样式贴 .browser-btn。 */
 .viewer-btn {
   flex: 0 0 auto;
   font-size: 12px;
@@ -481,6 +513,37 @@ body.resizing {
 
 .viewer-btn:disabled {
   opacity: 0.45;
+}
+
+/* 更新下载浮条：顶栏可拖动（cursor 沿用系统 grab 语义），
+   ✕ 取消下载并收浮条。位置与配色在组件内联（跟随主题变量）。 */
+.update-toast {
+  cursor: default;
+  touch-action: none;
+}
+
+.update-toast.dragging {
+  cursor: grabbing;
+  user-select: none;
+  /* 拖动中加一层强调，浮条不会跟着光标跳（我们只更新偏移）。 */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.update-toast-x {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.update-toast-x:hover {
+  color: var(--text);
+  background: var(--border);
 }
 
 /* 弹窗窗口根：满窗铺（无 pane 边框），标题栏复用 .viewer-bar。 */
@@ -613,6 +676,18 @@ body.resizing {
 .vtree-row:hover {
   background: var(--panel-2);
   color: var(--text);
+}
+
+/* 选中态（与侧栏会话行同款）：主题色淡底 + 左侧色条。
+   只有文件行有选中概念（目录行是导航，不是选择）。 */
+.vtree-row.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.vtree-row.active:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .vtree-row .vtree-caret {

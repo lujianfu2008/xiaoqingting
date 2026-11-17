@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { Block, ProjectMeta, SessionMeta, TaskView, UpdateRequestView } from "@blm/protocol";
+import type {
+  Block,
+  ProjectMeta,
+  SessionMeta,
+  TaskView,
+  UpdateRequestView,
+  WorkflowStage,
+} from "@blm/protocol";
 import { config } from "./config.js";
 
 // Session metadata + block history persistence (own storage, independent of the SDK).
@@ -156,29 +163,40 @@ export class Store {
 
   createProject(
     userId: string,
-    name: string,
-    agentId: string,
-    visibility: "personal" | "public" = "personal",
-    description?: string,
+    input: {
+      name: string;
+      agentId: string;
+      visibility?: "personal" | "public";
+      kind?: ProjectMeta["kind"];
+      workflow?: ProjectMeta["workflow"];
+      description?: string;
+    },
   ): ProjectRecord {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const visibility = input.visibility ?? "personal";
+    const kind = input.kind ?? "standard";
     const rec: ProjectRecord = {
       project_id: id,
       user_id: userId,
-      name,
-      agent_id: agentId,
+      name: input.name,
+      agent_id: input.agentId,
       created_at: now,
       updated_at: now,
       visibility,
-      ...(description ? { description } : {}),
+      // 协作/定时任务空间只允许个人项目（服务端路由已校验，这里兜底）。
+      ...(kind !== "standard" ? { kind } : {}),
+      ...(kind === "collab" && input.workflow && input.workflow.stages.length > 0
+        ? { workflow: input.workflow }
+        : {}),
+      ...(input.description ? { description: input.description } : {}),
     };
     if (visibility === "public") {
       // 公有域项目：工作空间在服务端，客户端永不感知此路径。
       fs.mkdirSync(publicProjectDir(id), { recursive: true });
       fs.writeFileSync(
         path.join(publicProjectDir(id), "README.md"),
-        `# ${name}\n\n公有域知识库：所有登录成员可查询；普通成员的修改会转为更新申请，管理员批准后生效。\n`,
+        `# ${input.name}\n\n公有域知识库：所有登录成员可查询；普通成员的修改会转为更新申请，管理员批准后生效。\n`,
       );
     }
     fs.writeFileSync(this.projectPath(id), JSON.stringify(rec, null, 2));
@@ -203,6 +221,16 @@ export class Store {
     return rec;
   }
 
+  /** Update a collab project's stage chain (access pre-checked). */
+  updateProjectWorkflow(id: string, stages: WorkflowStage[]): ProjectRecord | null {
+    const rec = this.getProject(id);
+    if (!rec) return null;
+    rec.workflow = { stages };
+    rec.updated_at = new Date().toISOString();
+    fs.writeFileSync(this.projectPath(id), JSON.stringify(rec, null, 2));
+    return rec;
+  }
+
   /** 本人全部项目 + 所有公有域项目（公域部分带 owner）。 */
   listProjects(userId: string): ProjectMeta[] {
     const dir = path.join(config.dataDir, "projects");
@@ -217,6 +245,8 @@ export class Store {
           out.push({
             ...meta,
             visibility: rec.visibility ?? "personal",
+            // 旧项目无 kind 字段 → 普通分类空间。
+            kind: rec.kind ?? "standard",
             owner: user_id,
           });
         }

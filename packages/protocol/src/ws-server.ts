@@ -137,6 +137,15 @@ export type WsTaskGone = z.infer<typeof WsTaskGone>;
 // 定时任务变更（定义在 schedules.js，经 index.ts 桶导出）：推给任务主人，
 // 连接建立后靠 REST 播种收敛，与 task_update 同构。
 
+// 显示诊断请求：管理员经 REST 发起，转发给目标用户的在线客户端。
+// scope: layout = 仅几何摘要；screenshot = 另附整窗截图。
+export const WsDiagRequest = z.object({
+  type: z.literal("diag_request"),
+  request_id: z.string(),
+  scope: z.enum(["layout", "screenshot"]),
+});
+export type WsDiagRequest = z.infer<typeof WsDiagRequest>;
+
 export const ServerMessage = z.discriminatedUnion("type", [
   WsMessageDelta,
   WsMessageBlock,
@@ -154,5 +163,6 @@ export const ServerMessage = z.discriminatedUnion("type", [
   WsTaskUpdate,
   WsTaskGone,
   WsScheduleUpdate,
+  WsDiagRequest,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;

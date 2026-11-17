@@ -11,13 +11,17 @@ import { handleConnection } from "./ws/handler.js";
 import { handleRelayConnection } from "./ws/relayHandler.js";
 import { setRelayProxyResolver, startRelayIngress } from "./relay/llmBridge.js";
 import { startOpenAiCompatServer } from "./openaiCompat.js";
+import { ensureDiagTaskDir } from "./diagTaskManager.js";
 
 async function main(): Promise<void> {
   ensureDataDirs();
+  ensureDiagTaskDir();
   const store = new Store();
   const manager = new AgentManager(store);
   // 存量任务迁移到 v2 模板快照表示（幂等；先于一切 REST/WS 入口）。
   manager.migrateLegacyTasks();
+  // 远程诊断任务：进程重启遗留的 running 强收为 timeout（幂等）。
+  manager.diagTasks.sweepStale();
   // 定时任务调度器：持久化 next_run_at，重启后首 tick 自然恢复。
   const scheduler = new ScheduleScheduler(manager, store);
   scheduler.start();

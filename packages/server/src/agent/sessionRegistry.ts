@@ -16,6 +16,11 @@ export class SessionRegistry {
     return proj.user_id === userId || proj.visibility === "public";
   }
 
+  /** 同 canUseProject 的公开门面（跨模块归属校验用）。 */
+  canUseProjectFor(userId: string, proj: ProjectRecord): boolean {
+    return this.canUseProject(userId, proj);
+  }
+
   createSession(
     userId: string,
     agentId: string,
@@ -34,16 +39,31 @@ export class SessionRegistry {
 
   createProject(
     userId: string,
-    name: string,
-    agentId: string,
-    visibility: "personal" | "public" = "personal",
-    description?: string,
+    input: {
+      name: string;
+      agentId: string;
+      visibility?: "personal" | "public";
+      kind?: "standard" | "collab" | "scheduled";
+      workflow?: { stages: import("@blm/protocol").WorkflowStage[] };
+      description?: string;
+    },
   ) {
-    return this.store.createProject(userId, name, agentId, visibility, description);
+    return this.store.createProject(userId, input);
   }
 
   listProjects(userId: string) {
     return this.store.listProjects(userId);
+  }
+
+  /** Update a collab project's stage chain (个人项目仅本人可改）。 */
+  setProjectWorkflow(
+    userId: string,
+    projectId: string,
+    stages: import("@blm/protocol").WorkflowStage[],
+  ): import("@blm/protocol").ProjectMeta | null {
+    const proj = this.store.getProject(projectId);
+    if (!proj || !this.canManageProject(userId, proj)) return null;
+    return this.store.updateProjectWorkflow(projectId, stages);
   }
 
   /** 个人项目仅本人可管理（删除）；公有域项目任何公有域管理员可管理。 */

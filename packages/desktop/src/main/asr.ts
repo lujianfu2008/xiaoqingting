@@ -1,10 +1,12 @@
 import path from "node:path";
 import fs from "node:fs";
-import { app } from "electron";
+import { modelDirOf } from "./modelFetch";
 
 // Local offline ASR: sherpa-onnx Paraformer (Chinese small, int8).
 // Pure NAPI native addon — works directly in the Electron main process.
 // (The previous engine, vosk+ffi-napi, was incompatible with Electron's V8.)
+// 模型不再随安装包分发：首次使用从所连服务器下载（modelFetch.ts），
+// 已装/手动放置的模型直接复用。
 
 const MODEL_DIR = "sherpa-paraformer";
 
@@ -16,12 +18,7 @@ let sherpa: SherpaModule | null = null;
 let recognizer: any = null;
 
 function modelDir(): string {
-  const name = MODEL_DIR;
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "models", name);
-  }
-  // dev: out/main -> packages/desktop/models
-  return path.join(__dirname, "../../models", name);
+  return modelDirOf(MODEL_DIR);
 }
 
 function loadRecognizer(): boolean {
@@ -33,7 +30,7 @@ function loadRecognizer(): boolean {
     }
     const dir = modelDir();
     if (!fs.existsSync(path.join(dir, "tokens.txt"))) {
-      throw new Error(`语音模型缺失（${dir}）`);
+      throw new Error("语音模型未就绪（设置 → 常规 → 语音模型 里下载，或手动放置）");
     }
     recognizer = new sherpa.OfflineRecognizer({
       modelConfig: {
@@ -57,7 +54,7 @@ function loadRecognizer(): boolean {
  * 识别再用逗号拼接——说话停顿处落逗号，弥补 Paraformer 整段识别无标点。 */
 export function transcribePcm(pcm: ArrayBuffer, pauses?: number[]): string {
   if (!loadRecognizer()) {
-    throw new Error("语音识别引擎未就绪，请重启应用重试");
+    throw new Error("语音模型未就绪（设置 → 常规 → 语音模型 里下载）");
   }
   const len = pcm.byteLength >> 1;
   const samples = new Float32Array(len);

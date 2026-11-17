@@ -2,7 +2,9 @@ import type { BlmState, GetState, SetState } from "../types";
 
 // 内置文件阅读器：多 tab、只读。openViewerFiles 按 path 去重
 // （已开的直接激活），treeRoot 取新文件的目录。关掉最后一个 tab
-// 时整个 pane 收起。
+// 时整个 pane 收起。用户手动关（closeViewerTab 关空 / closeViewerAll）
+// 会置 viewerAutoSuppressed：本轮内 agent 读写文件不再自动弹出，
+// 下一条用户消息重新武装（chat.ts 的 send/regenerate）。
 
 export function createViewerActions(
   set: SetState,
@@ -11,6 +13,7 @@ export function createViewerActions(
   BlmState,
   | "openViewerFiles"
   | "closeViewerTab"
+  | "closeViewerAll"
   | "activateViewerTab"
   | "setViewerOpen"
   | "setViewerAutoOpen"
@@ -49,6 +52,8 @@ export function createViewerActions(
           treeRoot: dirname(active.path) ?? cur.treeRoot,
           treeCollapsed: cur.treeCollapsed,
         },
+        // 手动点开文件 = 用户想看了，解除本轮的自动弹出暂停。
+        viewerAutoSuppressed: false,
       });
     },
 
@@ -59,12 +64,25 @@ export function createViewerActions(
       const tabs = cur.tabs.filter((x) => x.id !== id);
       if (tabs.length === 0) {
         // 最后一个 tab 关掉 = 整个 pane 收起。
-        set({ viewer: { open: false, tabs: [], activeId: null, treeRoot: cur.treeRoot, treeCollapsed: cur.treeCollapsed } });
+        set({
+          viewer: { open: false, tabs: [], activeId: null, treeRoot: cur.treeRoot, treeCollapsed: cur.treeCollapsed },
+          // 关掉全部内容视为用户不想被打扰（自动弹出的也在此打断）。
+          viewerAutoSuppressed: true,
+        });
         return;
       }
       const activeId =
         cur.activeId === id ? tabs[Math.min(idx, tabs.length - 1)].id : cur.activeId;
       set({ viewer: { ...cur, tabs, activeId } });
+    },
+
+    /** 总关闭：一键关掉所有 tab 并收起 pane。 */
+    closeViewerAll() {
+      const cur = get().viewer;
+      set({
+        viewer: { open: false, tabs: [], activeId: null, treeRoot: cur.treeRoot, treeCollapsed: cur.treeCollapsed },
+        viewerAutoSuppressed: true,
+      });
     },
 
     activateViewerTab(id) {

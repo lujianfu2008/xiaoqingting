@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen, shell, Notification } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { executeLocal } from "./executor";
@@ -23,11 +23,18 @@ import {
 import { synthesizeSpeech, stopSpeaking, listVoices } from "./tts";
 import { transcribePcm } from "./asr";
 import { configureWake, feedWakeChunk, stopWakeStream } from "./wake";
+import {
+  bindModelSource,
+  downloadModel,
+  modelsState,
+  seedModelStates,
+  type ModelName,
+} from "./modelFetch";
 import { applyAppMenu, setLanguage } from "./menu";
 import { resolveLanguage } from "./i18n";
 import { currentLanguage } from "./menu";
 import { closeToTray, destroyTray, trayIconPath } from "./tray";
-import { bindUpdater, checkNow } from "./updater";
+import { bindUpdater, cancelAndHide, checkNow } from "./updater";
 import { acquireLogin, isAccountLocked, releaseLogin } from "./loginLock";
 import { loadSettings, patchSettings, type CloseAction } from "./settings";
 import { safeSend } from "./safeSend";
@@ -54,6 +61,25 @@ function createWindow(): void {
 
   win.on("page-title-updated", (e) => e.preventDefault());
 
+  // UI 缩放防漂移：渲染层 dpr = zoomFactor × 屏幕缩放。
+  // 高分屏真机上发现 dpr 2.1 vs 屏幕缩放 1.75 的分叉
+  // ——主窗 webContents 被放大到 120%（Ctrl+滚轮/旧档
+  // 残留），整个 UI 比 175% 屏应有的大 20%，分栏全被
+  // 挤爆（"高分屏变形"真凶）。壳窗口不是网页：一律钉死
+  // zoomFactor=1，滚轮缩放事件也复位。内置浏览器的
+  // view 是独立 webContents，页面缩放不在此列。
+  const normalizeZoom = (): void => {
+    const wc = win.webContents;
+    const dpr = wc.getZoomFactor();
+    if (Math.abs(dpr - 1) > 0.001) {
+      console.warn(`[ui] resetting shell zoom ${dpr} → 1`);
+      wc.setZoomFactor(1);
+    }
+  };
+  normalizeZoom();
+  win.webContents.on("zoom-changed", normalizeZoom);
+  win.webContents.on("did-finish-load", normalizeZoom);
+
   // 只有 ✕ 可拦截：设置→关闭按钮行为=托盘 时点关闭进托盘。最小化不拦截：
   // — 始终正常缩到任务栏（拦截的话任务栏点击/Win+D 都会"消失"进托盘）。
   // before-quit raises the flag so 菜单退出/托盘退出 close for real.
@@ -72,7 +98,23 @@ function createWindow(): void {
 
   browser.registerHost(win);
   // Re-dock the browser view when the window resizes under it.
-  win.on("resize", () => browser.relayout(win));
+  // maximize/unmaximize 期间渲染层会整排重排并重推新
+  // rect——这里的 resize 重摆若与那次重推交错（Win 上
+  // 放大是分步动画），会把 view 按旧账面钉在旧尺寸
+  // （pane 已长大 = 右/下空白）。窗口状态切换后一拍内
+  // 不重摆，交给渲染层新 rect 与 1s 心跳兜底。
+  let stateSwitch = 0;
+  const markSwitch = (): void => {
+    stateSwitch = Date.now();
+  };
+  win.on("maximize", markSwitch);
+  win.on("unmaximize", markSwitch);
+  win.on("enter-full-screen", markSwitch);
+  win.on("leave-full-screen", markSwitch);
+  win.on("resize", () => {
+    if (Date.now() - stateSwitch < 350) return;
+    browser.relayout(win);
+  });
   win.on("closed", () => browser.shutdown());
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -87,6 +129,9 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // Required on Windows for Notification toasts (托盘最小化提示).
   app.setAppUserModelId("com.xiaoqingting.desktop");
+
+  // 语音模型按需下载：播种就绪状态（dev/手动放置的模型）。
+  seedModelStates();
 
   // 内置文件阅读器：viewer:// 协议 handler + 只读 IPC 通道。
   registerViewerIpc();
@@ -328,9 +373,40 @@ app.whenReady().then(() => {
   );
   ipcMain.handle(
     "blm:browser:setBounds",
-    (event, rect: { x: number; y: number; width: number; height: number }) => {
+    (
+      event,
+      rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        covered?: boolean;
+      },
+    ) => {
       const win = BrowserWindow.fromWebContents(event.sender);
-      if (win && rect) browser.setBounds(win, rect);
+      // force：渲染端 pane 的 rect 不变时也会重复上报（自愈
+      // 兜底），跳过 same 短路把 view 强制钉到 rect 上。
+      if (win && rect) browser.setBounds(win, rect, true);
+    },
+  );
+  // 渲染层视口自报（高分屏 DPI 分叉检测的原料）。
+  ipcMain.handle(
+    "blm:browser:setViewport",
+    (
+      event,
+      vp: { width: number; height: number; dpr: number },
+    ) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (
+        !win ||
+        !vp ||
+        typeof vp.width !== "number" ||
+        typeof vp.height !== "number" ||
+        typeof vp.dpr !== "number"
+      ) {
+        return;
+      }
+      browser.noteViewport(win, vp);
     },
   );
   ipcMain.handle("blm:browser:setMode", async (event, mode: "embedded" | "popup") => {
@@ -411,6 +487,25 @@ app.whenReady().then(() => {
     },
   );
   ipcMain.handle("blm:updater:check", () => checkNow());
+  // 更新浮条 ✕：取消下载并隐藏（新一轮检查恢复）。
+  ipcMain.on("blm:updater:cancel", () => cancelAndHide());
+
+  // 语音模型按需下载（modelFetch.ts）：状态播种 / 触发下载 /
+  // 绑定服务器源（登录后与 bindUpdater 同时绑定）。
+  ipcMain.handle("blm:models:state", () => modelsState());
+  ipcMain.handle(
+    "blm:models:bind",
+    (_e, args: { server_url?: unknown }) => {
+      if (!args || typeof args.server_url !== "string" || !args.server_url.trim()) return;
+      bindModelSource(args.server_url);
+    },
+  );
+  ipcMain.handle("blm:models:download", (_e, name: unknown) => {
+    if (name !== "sherpa-paraformer" && name !== "sherpa-kws") {
+      return { name: "sherpa-paraformer", ready: false, phase: "error", percent: 0, error: "无效请求" };
+    }
+    return downloadModel(name as ModelName);
+  });
   ipcMain.on("blm:wake:chunk", (event, pcm: ArrayBuffer) => {
     if (pcm instanceof ArrayBuffer) feedWakeChunk(pcm, event.sender);
   });
@@ -422,6 +517,45 @@ app.whenReady().then(() => {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
+  });
+  // 产品版本（诊断摘要用；打包环境没有 npm_package_version）。
+  ipcMain.handle("blm:app:version", () => app.getVersion());
+
+  // 显示诊断（服务端 diag_request → 渲染层采集）：主进程出
+  // 三样原料——整窗截图（capturePage 拍不到原生 view，
+  // 故合成 view 页面自己的位图）、原生 view 的账面摆位
+  // （布局摘要的 DOM 几何在渲染层手里，view bounds 在主进程
+  // 手里）与产品版本。posed=false 表示截图瞬间 view 被
+  // 遮罩藏着（采集必经管理对话框），画面里 stage 是白底。
+  ipcMain.handle("blm:diag:screenshot", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || win.isMinimized()) return null;
+    const shot = await browser.captureComposite(win);
+    if (!shot) return null;
+    return { image: shot.image, posed: shot.posed };
+  });
+  ipcMain.handle("blm:diag:browserBounds", () => browser.viewBounds());
+
+  // 显示诊断补充：主进程视角的屏幕真值（DPI 感知——
+  // 远程智能体问不出这些，wmic/注册表在高 DPI 下全是
+  // 虚拟化值）。bounds 物理像素，workArea DIP，scaleFactor
+  // 是 Electron 认定的缩放。渲染层 dpr 与这里的 scaleFactor
+  // 是否一致，诊断报告一眼可判。
+  ipcMain.handle("blm:diag:screenInfo", (event) => {
+    try {
+      const d = screen.getPrimaryDisplay();
+      const w = BrowserWindow.fromWebContents(event.sender);
+      // getContentSize() 返回 [宽, 高] 数组——协议里是对象，转一次。
+      const cs = w && !w.isDestroyed() ? w.getContentSize() : null;
+      return {
+        bounds: d.bounds,
+        workArea: d.workArea,
+        scaleFactor: d.scaleFactor,
+        contentSize: cs ? { width: cs[0], height: cs[1] } : null,
+      };
+    } catch {
+      return null;
+    }
   });
 
   createWindow();

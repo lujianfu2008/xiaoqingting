@@ -5,6 +5,11 @@ import type {
   Block,
   CreateTaskRequest,
   CreateScheduleRequest,
+  DiagDetailResponse,
+  DiagEntryMeta,
+  DiagTaskDetailResponse,
+  DiagTaskEntry,
+  DiagTaskKind,
   FlowAction,
   ImportMcpResult,
   ImportSkillsResult,
@@ -18,6 +23,7 @@ import type {
   SkillRegistrySearchResponse,
   McpServerInfo,
   ProjectMeta,
+  ProjectWorkflow,
   SkillInfo,
   SessionMeta,
   TaskView,
@@ -28,6 +34,7 @@ import type {
   UserSummary,
   UpdateLlmConfigRequest,
   WorkflowInfo,
+  WorkflowStage,
   WsPermissionRequest,
   WsToolExecRequest,
 } from "@blm/protocol";
@@ -165,6 +172,9 @@ export interface BlmState {
   viewer: ViewerState; // 内置文件阅读器（只读，多 tab）
   // agent 读取文件时自动弹出阅读器（默认关；设置 → 常规）。
   viewerAutoOpen: boolean;
+  // 用户手动关掉阅读器后置真：本轮对话内不再自动弹出，
+  // 下一条用户消息/重新生成时重新武装（不持久化）。
+  viewerAutoSuppressed: boolean;
 
   login(serverUrl: string, username: string, password: string): Promise<void>;
   register(
@@ -195,10 +205,14 @@ export interface BlmState {
     agentId: string;
     folder: "auto" | "choose";
     visibility?: "personal" | "public";
+    kind?: "standard" | "collab" | "scheduled";
+    workflow?: ProjectWorkflow;
   }): Promise<ProjectMeta | null>;
   deleteProject(id: string): Promise<void>;
   /** 设置项目描述（个人=本人；公域=管理员）；空串 = 清空。 */
   updateProjectDescription(id: string, description: string): Promise<boolean>;
+  /** 设置协作项目的环节链（仅本人；只影响之后新建的任务）。 */
+  updateProjectWorkflow(id: string, stages: WorkflowStage[]): Promise<boolean>;
   loadUpdateRequests(): Promise<void>;
   /** 批准/拒绝一条公有域更新申请（仅管理员）。 */
   decideUpdateRequest(id: string, approve: boolean, reason?: string): Promise<boolean>;
@@ -337,6 +351,8 @@ export interface BlmState {
   openViewerFiles(paths: string[]): void;
   /** 关一个 tab（关最后 → pane 收起）。 */
   closeViewerTab(id: string): void;
+  /** 总关闭：一键关掉全部 tab 并收起 pane。 */
+  closeViewerAll(): void;
   activateViewerTab(id: string): void;
   /** 展开/收起 pane（无 tab 时不可凭空展开）。 */
   setViewerOpen(on: boolean): void;
@@ -344,6 +360,34 @@ export interface BlmState {
   setViewerAutoOpen(on: boolean): void;
   /** 文件树折叠/展开（折叠时宽度拖条隐藏）。 */
   setTreeCollapsed(on: boolean): void;
+
+  // 显示诊断（服务端管理员请求 → 客户端自愿回传）。
+  /** 管理员请求时允许附整窗截图（设置 → 常规可关；关了只回几何摘要）。 */
+  diagAllowScreenshot: boolean;
+  setDiagAllowScreenshot(on: boolean): void;
+  /** 采集并回传布局摘要（+ 允许时的整窗截图）。 */
+  collectDiag(requestId: string, scope: "layout" | "screenshot"): Promise<void>;
+  // 管理员侧：发起采集与查看结果（仅管理页用）。
+  diagList: DiagEntryMeta[];
+  /** 发起一次采集。返回错误码（null = 已发起；user_offline = 目标不在线）。 */
+  collectDiagFrom(
+    username: string,
+    scope: "layout" | "screenshot",
+  ): Promise<string | null>;
+  loadDiagList(): Promise<boolean>;
+  loadDiagDetail(
+    id: string,
+  ): Promise<DiagDetailResponse | null>;
+  // 远程诊断任务（管理员借用在线客户端的智能体排障）。
+  diagTaskList: DiagTaskEntry[];
+  /** 发起一个诊断任务。返回错误码（null = 已发起）。 */
+  startDiagTask(
+    username: string,
+    kind: DiagTaskKind,
+  ): Promise<string | null>;
+  loadDiagTaskList(): Promise<boolean>;
+  loadDiagTaskDetail(id: string): Promise<DiagTaskDetailResponse | null>;
+  deleteDiagTask(id: string): Promise<boolean>;
 }
 
 // Actions that never prompt again while trust mode is on (includes command

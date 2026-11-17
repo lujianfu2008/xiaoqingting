@@ -135,10 +135,16 @@ export function createScheduleActions(
 
     async deleteSchedule(id) {
       const { serverUrl, token } = get();
+      // 服务端级联删专属会话（宿主任务没了，运行记录一起收走）：
+      // 客户端走既有 deleteSession 同步摘掉条目/tab/缓存。
+      const rec = get().schedules.find((x) => x.schedule_id === id);
       await request(serverUrl, token, `/api/schedules/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
-      set((s) => ({ schedules: s.schedules.filter((x) => x.schedule_id !== id) }));
+      set((s) => ({
+        schedules: s.schedules.filter((x) => x.schedule_id !== id),
+      }));
+      if (rec?.session_id) void get().deleteSession(rec.session_id);
     },
   };
 }

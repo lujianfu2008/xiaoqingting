@@ -96,3 +96,19 @@ export const ViewerStatResult = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("error"), error: z.string() }),
 ]);
 export type ViewerStatResult = z.infer<typeof ViewerStatResult>;
+
+// ---------- 语音模型按需下载（桌面端 main/modelFetch.ts） ----------
+// 模型不随安装包分发；首用语音时从所连服务器
+// /download/models/<name>.zip 下载解压。状态推设置面板。
+
+export const ModelNameSchema = z.enum(["sherpa-paraformer", "sherpa-kws"]);
+export type ModelName = z.infer<typeof ModelNameSchema>;
+
+export const ModelState = z.object({
+  name: ModelNameSchema,
+  ready: z.boolean(),
+  phase: z.enum(["idle", "downloading", "error"]),
+  percent: z.number().min(0).max(100),
+  error: z.string().optional(),
+});
+export type ModelState = z.infer<typeof ModelState>;

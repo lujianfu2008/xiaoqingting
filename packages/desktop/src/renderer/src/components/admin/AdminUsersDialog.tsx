@@ -4,6 +4,7 @@ import { useStore } from "../../store";
 import { useT } from "../../i18n";
 import { Overlay } from "../Overlay";
 import { AdminRelayPanel } from "./RelayPanel";
+import { AdminDiagPanel } from "./DiagPanel";
 
 // 用户管理（公有域管理员）/ 注册审核（管理员 + 其授权的审核员）。
 // manage = 全量用户管理（角色授权、禁用、审核）；review = 仅待审核注册列表。
@@ -29,7 +30,7 @@ export function AdminUsersDialog({
   const [users, setUsers] = useState<AdminUserDetail[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // manage 模式的小 tab：用户列表 / 操作日志（审计）/ 网络中继（仅管理员）。
-  const [tab, setTab] = useState<"users" | "audit" | "relay">("users");
+  const [tab, setTab] = useState<"users" | "audit" | "relay" | "diag">("users");
   // 行内重置密码：正在改的用户名 + 输入中的新密码（Electron 无 window.prompt）。
   const [resettingPw, setResettingPw] = useState<string | null>(null);
   const [pwInput, setPwInput] = useState("");
@@ -101,6 +102,7 @@ export function AdminUsersDialog({
       "relay.config_save": t("au.act.relaySave"),
       "workflow.global_save": t("au.act.workflowSave"),
       "workflow.global_delete": t("au.act.workflowDelete"),
+      "diag.collect": t("dg.tab"),
     };
     return map[action] ?? action;
   };
@@ -136,10 +138,21 @@ export function AdminUsersDialog({
             >
               {t("set.tabRelay")}
             </button>
+            <button
+              className={tab === "diag" ? "primary" : ""}
+              style={{ fontSize: 11, padding: "2px 10px" }}
+              onClick={() => setTab("diag")}
+            >
+              {t("dg.tab")}
+            </button>
           </div>
         )}
 
-        {tab === "relay" ? (
+        {tab === "diag" ? (
+          <div style={{ padding: "0 8px" }}>
+            <AdminDiagPanel />
+          </div>
+        ) : tab === "relay" ? (
           <div style={{ padding: "0 8px" }}>
             <AdminRelayPanel />
           </div>

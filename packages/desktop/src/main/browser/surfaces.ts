@@ -1,4 +1,9 @@
-import { BrowserWindow, WebContentsView, shell } from "electron";
+import {
+  BrowserWindow,
+  WebContentsView,
+  shell,
+  nativeImage,
+} from "electron";
 import { loadSettings } from "../settings";
 import { uiStrings } from "../i18n";
 import { safeSend, windowAlive } from "../safeSend";
@@ -338,8 +343,19 @@ export async function setMode(
   return state();
 }
 
-/** Dock the visible view at the renderer-reported rect (0 size = hidden). */
-export function setBounds(win: BrowserWindow, rect: { x: number; y: number; width: number; height: number }): void {
+/** Dock the visible view at the renderer-reported rect (0 size = hidden).
+ *  force=true 跳过 same 判断：show() 切 view 时全局 bounds 可能
+ *  是上一会话/上一布局的旧值，view 刚被按旧值摆过——渲染端随后
+ *  的上报必须真正落到 view 上，不能被「尺寸没变」挡掉。
+ *  covered=true（弹窗遮罩/拖拽临时隐藏）：记下真实几何但
+ *  不摆 view（view 保持/归于隐藏）——诊断摘要用的 rect 不会
+ *  被「弹窗开着」污染成 0 尺寸。 */
+export function setBounds(
+  win: BrowserWindow,
+  rect: { x: number; y: number; width: number; height: number; covered?: boolean },
+  force = false,
+): void {
+  const covered = rect.covered === true;
   const next = {
     x: Math.max(0, Math.round(rect.x)),
     y: Math.max(0, Math.round(rect.y)),
@@ -350,7 +366,21 @@ export function setBounds(win: BrowserWindow, rect: { x: number; y: number; widt
     next.x === bounds.x && next.y === bounds.y && next.width === bounds.width && next.height === bounds.height;
   bounds = next;
   const view = visibleView;
-  if (!view) return;
+  if (!view || covered) {
+    // covered：藏掉 view（native 图永远在遮罩之上，必须归零），
+    // 但 bounds 保留真实几何供诊断。viewHidden 记下
+    // 「账面 rect 未真正摆上」，viewBounds().posed 据此分辨。
+    if (view && covered) {
+      try {
+        view.setBounds(ZERO);
+      } catch {
+        // gone already
+      }
+    }
+    if (covered) viewHidden = true;
+    return;
+  }
+  viewHidden = false;
   try {
     if (host !== win) {
       try {
@@ -361,10 +391,56 @@ export function setBounds(win: BrowserWindow, rect: { x: number; y: number; widt
       host = win;
       win.contentView.addChildView(view);
     }
-    if (!same) view.setBounds({ ...bounds });
+    if (!same || force) view.setBounds({ ...bounds });
   } catch {
     // window gone already
   }
+}
+
+/** 渲染层最后一次自报的视口（CSS 尺寸 + dpr）。 */
+let lastViewport: { width: number; height: number; dpr: number } | null = null;
+
+/**
+ * 高分屏 DPI 分叉检测（pane 满屏右/下空白的另一根因）：
+ * 渲染层每次上报 stage rect 时顺带自报视口。主进程对照
+ * 窗口内容区尺寸——理论上 CSS px 与 DIP 一一对应，两者
+ * 恒等；不一致即「窗口 DPI 上下文与屏幕缩放分叉」
+ * （改系统缩放后应用未重启 / 跨 DPI 屏拖动后的窗口）。
+ * 分叉时按渲染层认知重设窗口内容区，让两侧坐标系重新
+ * 对齐（一次性自愈，不再持续抖动）。
+ */
+export function noteViewport(
+  win: BrowserWindow,
+  vp: { width: number; height: number; dpr: number },
+): void {
+  lastViewport = vp;
+  try {
+    const content = win.getContentSize();
+    if (
+      Math.abs(content[0] - vp.width) <= 2 &&
+      Math.abs(content[1] - vp.height) <= 2
+    ) {
+      return; // 一致：最常见的健康路径
+    }
+    // 分叉：以渲染层为准重同步。只修一次（同步后再分叉
+    // 会在下一次上报再修——1s 心跳保证收口）。分叉本身
+    // 不涉引擎，日志不含品牌词，直接落。
+    console.warn(
+      `[browser] viewport/DIP divergence: renderer ${vp.width}x${vp.height} @${vp.dpr} vs content ${content[0]}x${content[1]} — resyncing`,
+    );
+    win.setContentSize(vp.width, vp.height);
+  } catch {
+    // window gone already
+  }
+}
+
+/** 诊断摘要用：渲染层视口自报值。 */
+export function rendererViewport(): {
+  width: number;
+  height: number;
+  dpr: number;
+} | null {
+  return lastViewport ? { ...lastViewport } : null;
 }
 
 /** Re-apply the last reported rect (called when the window resizes). */
@@ -374,6 +450,82 @@ export function relayout(win: BrowserWindow): void {
     visibleView.setBounds({ ...bounds });
   } catch {
     // view gone already
+  }
+}
+
+/** Last renderer-reported rect, plus whether the view is
+ *  actually posed there right now (遮罩开着时 view 已被
+ *  归零，bounds 只是「几何账面」——诊断要能分辨）。 */
+export function viewBounds(): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  posed: boolean;
+} {
+  return { ...bounds, posed: !viewHidden };
+}
+
+// 遮罩把可见 view 归零后置位；view 重新按 bounds 摆上时清零。
+let viewHidden = false;
+
+/**
+ * 诊断截图：整窗截图（capturePage 只拍主 webContents，
+ * 拍不到原生 view）+ view 页面自己的位图，把后者贴到
+ * 账面摆位上合成一张。遮罩开着（view 被藏）也贴——
+ * stage 是白底，贴上即「无遮罩时应有的样子」，posed=false
+ * 告诉诊断页 view 当时其实被藏着。无页面时退化为纯整窗截图。
+ */
+export async function captureComposite(
+  win: BrowserWindow,
+): Promise<{ image: Electron.NativeImage; posed: boolean } | null> {
+  const main = await win.webContents.capturePage();
+  if (main.isEmpty()) return null;
+  const view = visibleView;
+  if (!view) return { image: main, posed: false };
+  let page: Electron.NativeImage | null = null;
+  try {
+    if (!view.webContents.isDestroyed()) {
+      page = await view.webContents.capturePage();
+    }
+  } catch {
+    page = null; // view gone mid-capture
+  }
+  if (!page || page.isEmpty()) return { image: main, posed: false };
+  // 位图合成：两端都来自本机 toBitmap()，格式天然一致；
+  // 只做行拷贝再 createFromBitmap 回去。
+  const scaleFactors = main.getScaleFactors().filter((s) => s > 1);
+  const sf = scaleFactors.length > 0 ? scaleFactors[scaleFactors.length - 1] : 1;
+  const mw = main.getSize().width, mh = main.getSize().height;
+  const vw = page.getSize().width, vh = page.getSize().height;
+  const px = Math.round(bounds.x * sf), py = Math.round(bounds.y * sf);
+  let mbuf: Buffer, vbuf: Buffer;
+  try {
+    mbuf = main.toBitmap({ scaleFactor: sf });
+    vbuf = page.toBitmap({ scaleFactor: sf });
+  } catch {
+    return { image: main, posed: false };
+  }
+  if (mbuf.length < mh * mw * 4 || vbuf.length < vh * vw * 4) {
+    return { image: main, posed: false };
+  }
+  // 贴回前先把 view 区域裁进画面范围（部分出窗就只贴窗内）。
+  const copyW = Math.min(vw, mw - px), copyH = Math.min(vh, mh - py);
+  if (copyW <= 0 || copyH <= 0) return { image: main, posed: false };
+  for (let row = 0; row < copyH; row++) {
+    const src = row * vw * 4;
+    const dst = (py + row) * mw * 4 + px * 4;
+    vbuf.copy(mbuf, dst, src, src + copyW * 4);
+  }
+  try {
+    const image = nativeImage.createFromBitmap(mbuf, {
+      width: mw,
+      height: mh,
+      scaleFactor: sf,
+    });
+    return { image, posed: !viewHidden };
+  } catch {
+    return { image: main, posed: !viewHidden };
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "xiaoqingting",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.5.87",
   "description": "小蜻蜓智能体 — server/desktop monorepo",
   "workspaces": [
     "packages/*"
@@ -10,6 +10,8 @@
     "dev:server": "npm run dev -w @blm/server",
     "dev:desktop": "npm run dev -w @blm/desktop",
     "build": "npm run build --workspaces --if-present",
+    "build:android": "npm run build -w @blm/desktop && cd packages/mobile-android && ./gradlew assembleDebug",
+    "build:android-release": "npm run build -w @blm/desktop && cd packages/mobile-android && ./gradlew assembleRelease",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "setup": "node setup.js",
     "start:all": "start-all.bat"

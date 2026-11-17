@@ -199,6 +199,8 @@ export class MessageRouter {
             if (this.sessions.get(sessionId) === created) this.sessions.delete(sessionId);
             this.lastSpeaker.delete(sessionId);
           },
+          // 全部回合清空（真正空闲）：远程诊断任务据此结算报告。
+          onIdle: () => this.onIdleHook?.(sessionId),
         },
         this.updateRequests,
       );
@@ -207,6 +209,10 @@ export class MessageRouter {
     }
     return session;
   }
+
+  /** 远程诊断任务的空闲结算钩子（DiagTaskManager 注入；
+   *  无任务时为空函数，零开销）。 */
+  onIdleHook: (sessionId: string) => void = () => {};
 
   handleInterrupt(userId: string, sessionId: string): void {
     const rec = this.store.getSession(sessionId);

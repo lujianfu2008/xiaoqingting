@@ -19,6 +19,7 @@ import { createChatActions } from "./actions/chat";
 import { createVoiceActions } from "./actions/voice";
 import { createBrowserActions } from "./actions/browser";
 import { createViewerActions } from "./actions/viewer";
+import { createDiagActions } from "./actions/diag";
 
 export type { BlmState, ViewerState, ViewerTab, VoiceSettings, WsStatus } from "./types";
 
@@ -84,6 +85,9 @@ export const useStore = create<BlmState>((set, get) => ({
   browser: { mode: "embedded", open: false, url: "", title: "", session_id: "" },
   viewer: { open: false, tabs: [], activeId: null, treeRoot: null, treeCollapsed: false },
   viewerAutoOpen: localStorage.getItem(LS.viewerAutoOpen) === "1",
+  viewerAutoSuppressed: false,
+  diagList: [],
+  diagTaskList: [],
 
   ...createAuthActions(set, get),
   ...createConnectionActions(set, get),
@@ -101,6 +105,7 @@ export const useStore = create<BlmState>((set, get) => ({
   ...createVoiceActions(set, get),
   ...createBrowserActions(set, get),
   ...createViewerActions(set, get),
+  ...createDiagActions(set, get),
 }));
 
 export function loadAgents(): Promise<void> {

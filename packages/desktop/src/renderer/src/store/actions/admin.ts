@@ -1,4 +1,14 @@
-import type { AdminUserDetail, AuditEntry, UpdateRequestView } from "@blm/protocol";
+import type {
+  AdminUserDetail,
+  AuditEntry,
+  DiagDetailResponse,
+  DiagEntryMeta,
+  DiagListResponse,
+  DiagTaskDetailResponse,
+  DiagTaskKind,
+  DiagTaskListResponse,
+  UpdateRequestView,
+} from "@blm/protocol";
 import type { BlmState, GetState, SetState } from "../types";
 import { apiBase } from "../http";
 import { t } from "../../i18n";
@@ -22,6 +32,13 @@ export function createAdminActions(
   | "resetUserPassword"
   | "kickUser"
   | "loadAuditLog"
+  | "collectDiagFrom"
+  | "loadDiagList"
+  | "loadDiagDetail"
+  | "startDiagTask"
+  | "loadDiagTaskList"
+  | "loadDiagTaskDetail"
+  | "deleteDiagTask"
 > {
   // 非 2xx → 转成提示并返回 false（immutable_account 是内置管理员的预期拒绝）。
   const okOrToast = async (res: Response): Promise<boolean> => {
@@ -209,6 +226,117 @@ export function createAdminActions(
         const data = (await res.json()) as { entries: AuditEntry[] };
         set({ auditLog: data.entries });
         return true;
+      } catch {
+        return false;
+      }
+    },
+
+    // ---------- 显示诊断（仅管理员） ----------
+
+    /** 向在线用户发起一次采集。返回错误码（null = 已发起）。 */
+    async collectDiagFrom(username, scope) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/diag/${encodeURIComponent(username)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ scope }),
+        });
+        if (res.ok) return null;
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        return body.error ?? "fail";
+      } catch {
+        return "network";
+      }
+    },
+
+    async loadDiagList() {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/diag`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return false;
+        const data = (await res.json()) as DiagListResponse;
+        set({ diagList: data.entries });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    async loadDiagDetail(id) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/diag/${encodeURIComponent(id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as DiagDetailResponse;
+      } catch {
+        return null;
+      }
+    },
+
+    // ---------- 远程诊断任务（借用在线客户端的智能体） ----------
+
+    /** 发起一个诊断任务。返回错误码（null = 已发起）。 */
+    async startDiagTask(username, kind) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/admin/diag-task/${encodeURIComponent(username)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ kind }),
+          },
+        );
+        if (res.ok) return null;
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        return body.error ?? "fail";
+      } catch {
+        return "network";
+      }
+    },
+
+    async loadDiagTaskList() {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/diag-task`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return false;
+        const data = (await res.json()) as DiagTaskListResponse;
+        set({ diagTaskList: data.entries });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    async loadDiagTaskDetail(id) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/admin/diag-task/${encodeURIComponent(id)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (!res.ok) return null;
+        return (await res.json()) as DiagTaskDetailResponse;
+      } catch {
+        return null;
+      }
+    },
+
+    async deleteDiagTask(id) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/admin/diag-task/${encodeURIComponent(id)}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+        );
+        return res.ok;
       } catch {
         return false;
       }

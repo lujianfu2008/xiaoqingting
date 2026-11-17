@@ -3,6 +3,7 @@
 /// <reference types="vite/client" />
 
 import type {
+  ModelState,
   ViewerListDirResult,
   ViewerOpenDialogResult,
   ViewerReadResult,
@@ -55,6 +56,23 @@ declare global {
       onLangChanged(cb: (lang: string) => void): () => void;
       getPrefs(): Promise<{ closeAction: "quit" | "tray" }>;
       setCloseAction(v: "quit" | "tray"): Promise<"quit" | "tray">;
+      diagScreenshot(): Promise<{
+        image: Electron.NativeImage;
+        posed: boolean;
+      } | null>;
+      diagBrowserBounds(): Promise<{
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }>;
+      diagScreenInfo(): Promise<{
+        bounds: { x: number; y: number; width: number; height: number };
+        workArea: { x: number; y: number; width: number; height: number };
+        scaleFactor: number;
+        contentSize: { width: number; height: number } | null;
+      } | null>;
+      diagAppVersion(): Promise<string>;
       accessScope: {
         get(projectId?: string): Promise<AccessScopeState>;
         setMode(mode: AccessScopeState["mode"], projectId?: string): Promise<AccessScopeState>;
@@ -81,6 +99,15 @@ declare global {
       onNotifyActivate(cb: (sessionId: string | null) => void): () => void;
       bindUpdater(serverUrl: string): Promise<void>;
       checkUpdate(): Promise<"up_to_date" | "available" | "error">;
+      /** 更新浮条 ✕：取消下载并隐藏（新一轮检查恢复）。 */
+      cancelUpdate(): void;
+      // 语音模型按需下载（首用语音时拉取；进度经 onModelState 推送）。
+      bindModelSource(serverUrl: string): Promise<void>;
+      modelsState(): Promise<ModelState[]>;
+      downloadModel(
+        name: "sherpa-paraformer" | "sherpa-kws",
+      ): Promise<ModelState>;
+      onModelState(cb: (s: ModelState) => void): () => void;
       onUpdateProgress(
         cb: (s: {
           phase: "idle" | "downloading" | "downloaded";
@@ -125,7 +152,18 @@ declare global {
       browser: {
         state(): Promise<BrowserState>;
         setActiveSession(sessionId: string | null): Promise<void>;
-        setBounds(rect: { x: number; y: number; width: number; height: number }): Promise<void>;
+        setBounds(rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        covered?: boolean;
+      }): Promise<void>;
+        setViewport(vp: {
+          width: number;
+          height: number;
+          dpr: number;
+        }): Promise<void>;
         setMode(mode: "embedded" | "popup"): Promise<BrowserState>;
         open(url: string): Promise<{ ok: boolean; error?: string }>;
         close(): Promise<void>;

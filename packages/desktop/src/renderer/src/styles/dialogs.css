@@ -18,6 +18,28 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* 选项多的表单（新建项目等）不得溢出视口：限高 + 内容区滚动 */
+  max-height: calc(100vh - 64px);
+  max-width: calc(100vw - 48px);
+}
+
+/* 弹窗中部内容：超高时自身滚动，把标题与底部按钮留在视口内。
+   min-height:0 允许 flex 子项收缩到容器限高以下（否则 auto 会撑破）。 */
+.dialog-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  /* 负外边距抵消 .dialog 的 padding，滚出区贴近弹窗边缘 */
+  margin: -12px -24px;
+  padding: 12px 24px;
+}
+
+.dialog .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  /* 底部按钮条钉在弹窗底：内容滚动时按钮始终可见 */
+  flex-shrink: 0;
+  padding-top: 4px;
 }
 
 .dialog h2 {
@@ -75,10 +97,4 @@
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.dialog .actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }

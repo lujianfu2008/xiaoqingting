@@ -8,6 +8,7 @@ import {
   SessionSearchQuery,
   SetProjectDescriptionRequest,
   ShareSessionRequest,
+  UpdateProjectWorkflowRequest,
 } from "@blm/protocol";
 import { blocksToMarkdown } from "./exportMarkdown.js";
 import type { AgentManager } from "../agent/AgentManager.js";
@@ -95,13 +96,19 @@ export function registerSessionRoutes(
     if (visibility === "public" && !isPublicAdmin(req.userId)) {
       return reply.code(403).send({ error: "forbidden" });
     }
-    const rec = manager.createProject(
-      req.userId,
-      parsed.data.name.trim(),
-      parsed.data.agent_id ?? "assistant",
+    const kind = parsed.data.kind ?? "standard";
+    // 协作/定时任务空间是个人工作空间，与公有域语义不混（本期不做公域 typed 项目）。
+    if (kind !== "standard" && visibility === "public") {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const rec = manager.createProject(req.userId, {
+      name: parsed.data.name.trim(),
+      agentId: parsed.data.agent_id ?? "assistant",
       visibility,
-      parsed.data.description,
-    );
+      kind,
+      workflow: kind === "collab" ? parsed.data.workflow : undefined,
+      description: parsed.data.description,
+    });
     return reply.code(201).send({
       project_id: rec.project_id,
       name: rec.name,
@@ -109,9 +116,28 @@ export function registerSessionRoutes(
       created_at: rec.created_at,
       updated_at: rec.updated_at,
       visibility: rec.visibility,
+      kind: rec.kind ?? "standard",
       owner: rec.user_id,
+      ...(rec.workflow ? { workflow: rec.workflow } : {}),
       ...(rec.description ? { description: rec.description } : {}),
     });
+  });
+
+  // 设置协作项目的环节链（仅本人；只影响之后新建的任务）。
+  app.post("/api/projects/:id/workflow", (req, reply) => {
+    const parsed = UpdateProjectWorkflowRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const result = manager.setProjectWorkflow(
+      req.userId,
+      (req.params as { id: string }).id,
+      parsed.data.stages,
+    );
+    if (!result.ok) {
+      return reply
+        .code(result.code === "forbidden" ? 403 : 404)
+        .send({ error: result.code });
+    }
+    return { ok: true };
   });
 
   app.delete("/api/projects/:id", (req, reply) => {

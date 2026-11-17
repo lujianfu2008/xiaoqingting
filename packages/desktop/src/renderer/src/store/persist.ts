@@ -14,6 +14,8 @@ export const LS = {
   notifyEnabled: "blm.notifyEnabled",
   // agent 读取文件时自动弹出阅读器（设置 → 常规；缺省 = 关）。
   viewerAutoOpen: "blm.viewerAutoOpen",
+  // 更新下载浮条拖动后的位置（{right,bottom} JSON；缺省 = 右下角）。
+  updateToastPos: "blm.updateToastPos",
   // 代码高亮主题（highlight.js 官方模板名；见 viewer/codeTheme.ts）。
   codeTheme: "blm.codeTheme",
   // 界面主题（见 theme/uiTheme.ts；缺省 = 墨蓝深色）。
@@ -38,6 +40,8 @@ export const LS = {
   avatarVisible: "blm.avatarVisible",
   // 登录过的用户名（JSON 数组，最近优先；只记名字绝不记密码）。
   loginHistory: "blm.loginHistory",
+  // 显示诊断：允许在管理员请求时附整窗截图（缺省 = 允许）。
+  diagAllowScreenshot: "blm.diagAllowScreenshot",
 } as const;
 
 /** 登录历史（登录屏快捷选择）。坏数据一律当空。 */

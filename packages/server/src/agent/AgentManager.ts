@@ -1,11 +1,21 @@
-import type { AttachmentImage, ServerMessage, UpdateRequestStatus, UpdateRequestView } from "@blm/protocol";
+import type {
+  AttachmentImage,
+  DiagResult,
+  ServerMessage,
+  UpdateRequestStatus,
+  UpdateRequestView,
+} from "@blm/protocol";
 import { Store, sharedWithUser, type ProjectRecord, type SessionRecord, type TaskRecord } from "../store.js";
 import { AgentSession } from "./AgentSession.js";
 import { ConnectionRegistry } from "./connections.js";
 import { MessageRouter } from "./messageRouter.js";
 import { SessionRegistry } from "./sessionRegistry.js";
 import { TaskManager, type CreateTaskInput, type TaskFlowInput, type FlowResult } from "./taskManager.js";
+import { deleteProjectSchedules as deleteProjectSchedulesImpl } from "../scheduleStore.js";
+import { listProjectSchedules } from "../scheduleStore.js";
 import { UpdateRequestManager } from "./updateRequests.js";
+import { storeDiagResult } from "../diagStore.js";
+import { DiagTaskManager } from "../diagTaskManager.js";
 
 // Routes messages between WebSocket connections and per-session agent loops.
 // Server messages are broadcast to every connection of the owning user; shared
@@ -21,6 +31,8 @@ export class AgentManager {
   private router: MessageRouter;
   private updateRequests: UpdateRequestManager;
   private tasks: TaskManager;
+  /** 远程诊断任务（管理员借用在线客户端的智能体排障）。 */
+  diagTasks: DiagTaskManager;
 
   constructor(store: Store) {
     this.store = store;
@@ -28,11 +40,19 @@ export class AgentManager {
     this.registry = new SessionRegistry(store);
     this.updateRequests = new UpdateRequestManager(store, this.conns);
     this.tasks = new TaskManager(store, this.conns, this.registry);
+    this.diagTasks = new DiagTaskManager(store, this);
     // 工作台跟随指派：本机执行/审批的目标由任务当前负责人决定；共享会话
     // 一律钉死会话主人（使用方只是借用宿主的能力与信息，不能把操作引到
     // 自己机器上）。
     this.conns.execTargetResolver = (sid) => this.tasks.executorOf(sid);
     this.router = new MessageRouter(store, this.conns, this.sessions, this.updateRequests, this.tasks);
+    // 诊断任务的空闲结算钩子（先于一切消息入口注入）。
+    this.router.onIdleHook = (sessionId) => {
+      const task = this.diagTasks
+        .list()
+        .find((e) => e.session_id === sessionId && e.status === "running");
+      if (task) this.diagTasks.onTurnEnd(task.task_id);
+    };
   }
 
   // ---------- connections ----------
@@ -41,8 +61,9 @@ export class AgentManager {
     userId: string,
     send: (msg: ServerMessage) => void,
     close?: () => void,
+    kind?: "mobile",
   ): () => void {
-    return this.conns.registerConnection(userId, send, close);
+    return this.conns.registerConnection(userId, send, close, kind);
   }
 
   /** 账号被禁用：通知并断开该用户的全部连接。 */
@@ -146,12 +167,28 @@ export class AgentManager {
 
   createProject(
     userId: string,
-    name: string,
-    agentId: string,
-    visibility: "personal" | "public" = "personal",
-    description?: string,
+    input: {
+      name: string;
+      agentId: string;
+      visibility?: "personal" | "public";
+      kind?: "standard" | "collab" | "scheduled";
+      workflow?: import("@blm/protocol").ProjectWorkflow;
+      description?: string;
+    },
   ) {
-    return this.registry.createProject(userId, name, agentId, visibility, description);
+    return this.registry.createProject(userId, input);
+  }
+
+  /** 设置协作项目的环节链（个人项目=本人可改）。
+   *  环节只影响之后新建的任务，在途任务按建任务快照不变。 */
+  setProjectWorkflow(
+    userId: string,
+    projectId: string,
+    stages: import("@blm/protocol").WorkflowStage[],
+  ): { ok: true } | { ok: false; code: "not_found" | "forbidden" } {
+    return this.registry.setProjectWorkflow(userId, projectId, stages)
+      ? { ok: true }
+      : { ok: false, code: "not_found" };
   }
 
   /** 设置项目描述（个人项目=本人；公有域项目=公有域管理员）。
@@ -187,9 +224,31 @@ export class AgentManager {
     if (proj.visibility === "public") {
       this.updateRequests.rejectAllForProject(projectId, "项目已删除");
     }
+    // 定时任务项目删除：其中定时任务一并删除（参照会话降级语义的收紧：
+    // 定时任务没了项目就没有宿主配置，保留只会继续在默认空间触发）。
+    // 级联前先取引用，专属会话/历史一并收走（宿主删了记录不留）。
+    const schedSessions = listProjectSchedules(projectId)
+      .map((r) => r.session_id)
+      .filter((id): id is string => !!id);
+    for (const sid of schedSessions) this.deleteSession(proj.user_id, sid);
+    deleteProjectSchedulesImpl(projectId);
     return this.registry.deleteProjectRecord(projectId)
       ? { ok: true }
       : { ok: false, code: "not_found" };
+  }
+
+  /** 定时任务的归属校验（scheduleRoutes 用）：项目须存在、本人可用
+   *  且类型为 scheduled。 */
+  validateScheduleProject(
+    userId: string,
+    projectId: string,
+  ): { ok: true } | { ok: false; code: "not_found" | "forbidden" | "bad_project" } {
+    const proj = this.store.getProject(projectId);
+    if (!proj || !this.registry.canUseProjectFor(userId, proj)) {
+      return { ok: false, code: projectId ? "bad_project" : "not_found" };
+    }
+    if ((proj.kind ?? "standard") !== "scheduled") return { ok: false, code: "bad_project" };
+    return { ok: true };
   }
 
   listSharedSessions(userId: string) {
@@ -328,6 +387,20 @@ export class AgentManager {
     result: { ok: boolean; output?: string; error?: string; images?: AttachmentImage[] },
   ): void {
     this.router.handleToolExecResult(userId, requestId, result);
+  }
+
+  /** 推送诊断请求给目标用户的全部在线连接。 */
+  sendDiagRequest(
+    userId: string,
+    requestId: string,
+    scope: "layout" | "screenshot",
+  ): void {
+    this.conns.broadcast(userId, { type: "diag_request", request_id: requestId, scope });
+  }
+
+  /** Route a diag_result to the diag store (id-keyed). */
+  handleDiagResult(userId: string, result: DiagResult): void {
+    storeDiagResult(userId, result);
   }
 
   /** Stop the current run without closing the session (used on interrupt). */

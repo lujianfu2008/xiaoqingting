@@ -30,11 +30,13 @@ const ScheduleSpec = {
   agent_id: z.string().trim().min(1).max(64),
 };
 
-// REST: 新建（next_run_at 服务端算）。
+// REST: 新建（next_run_at 服务端算）。project_id = 定时任务项目
+// （缺省 = 默认空间，兼容旧数据）。
 export const CreateScheduleRequest = z.object({
   ...ScheduleSpec,
   time: ScheduleTime,
   enabled: z.boolean().optional(),
+  project_id: z.string().optional(),
 });
 export type CreateScheduleRequest = z.infer<typeof CreateScheduleRequest>;
 
@@ -43,6 +45,7 @@ export const UpdateScheduleRequest = z.object({
   ...ScheduleSpec,
   time: ScheduleTime,
   enabled: z.boolean(),
+  project_id: z.string().optional(),
 });
 export type UpdateScheduleRequest = z.infer<typeof UpdateScheduleRequest>;
 
@@ -60,6 +63,8 @@ export const ScheduleView = z.object({
   time: ScheduleTime,
   enabled: z.boolean(),
   session_id: z.string().nullable(), // null = 尚未触发过（首触自动建专属会话）
+  // 所属定时任务项目；null/缺省 = 默认空间（兼容旧数据）。
+  project_id: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   next_run_at: z.string().nullable(), // null = 已停用 / once 已消耗

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore, loadAgents } from "./store";
 import { setLang, useT } from "./i18n";
 import { useWakeWord } from "./useWakeWord";
@@ -113,7 +113,10 @@ export default function App(): React.JSX.Element {
     return id === "sidebar" && panes[expanded] === "max";
   };
   const browserShown = embedded && visible("browser");
-  const viewerShown = visible("viewer");
+  // 阅读器没开时不占位：viewerShown 不带 viewer.open 的话，
+  // fitSplit 会给一个不存在的 pane 预留 260px+分隔条，
+  // 浏览器一打开就被压到保底宽，空出的位置全被聊天区吃掉。
+  const viewerShown = viewerOpen && visible("viewer");
   const chatShown = visible("chat");
   // With the chat folded away the page grows into its space; with the
   // page expanded the chat is hidden and the page must not keep its
@@ -188,6 +191,8 @@ export default function App(): React.JSX.Element {
       void loadAgents();
       // 更新源即所连服务器：登录/启动恢复后绑定并检查一次（同源只配一次）。
       void window.blm.bindUpdater(serverUrl).catch(() => undefined);
+      // 语音模型下载源与更新源同服务器（首次用语音时拉取）。
+      void window.blm.bindModelSource(serverUrl).catch(() => undefined);
       connect();
     });
     return () => {
@@ -224,15 +229,32 @@ export default function App(): React.JSX.Element {
   // The viewer pane sits between chat and browser: dragging its splitter
   // sets the distance to the right edge minus whatever the browser occupies
   // (the browser's own drag formula `viewport - clientX` stays untouched).
+  // 聊天到保底后拖动条就停——浏览器开着时让它跟着让位（缩到
+  // 自身保底为止），一条拖动到底，不用再去拖浏览器自己的拖动条。
+  // 让位量从拖动起点的宽度快照算：逐事件从「当前」浏览器宽扣，
+  // 指针停在原地微抖也会把它一路放到保底（复利）。
+  const viewerDragStart = useRef<number | null>(null);
   const dragViewer = (clientX: number): void =>
-    setWanted((s) =>
-      fitSplit(
-        { ...s, viewer: viewport - clientX - (browserShown ? split.browser : 0) },
-        viewport,
-        browserShown,
-        viewerShown,
-      ),
-    );
+    setWanted((s) => {
+      viewerDragStart.current ??= s.browser;
+      const startBrowser = viewerDragStart.current;
+      // 拖动条右侧 = 阅读器 +（开浏览器时）分隔条 + 浏览器。
+      const right = viewport - clientX - (browserShown ? SPLITTER_W : 0);
+      const splitters = SPLITTER_W * ((browserShown ? 1 : 0) + 1) + SPLITTER_W;
+      const cap = Math.max(
+        VIEWER_MIN,
+        viewport - split.sidebar - splitters - CHAT_MIN - (browserShown ? startBrowser : 0),
+      );
+      const browser = browserShown
+        ? Math.max(BROWSER_MIN, startBrowser - Math.max(0, right - startBrowser - cap))
+        : 0;
+      return fitSplit({ ...s, viewer: right - browser, browser }, viewport, browserShown, viewerShown);
+    });
+  // 拖动收尾清快照（Splitter 的 onDragChange 只报布尔，收尾
+  // 时机在 pointer up —— 用它带出清零）。
+  useEffect(() => {
+    if (!dragging) viewerDragStart.current = null;
+  }, [dragging]);
 
   const setMode = (id: PaneId, mode: PaneMode): void =>
     setPanes({ ...NORMAL_PANES, [id]: mode });

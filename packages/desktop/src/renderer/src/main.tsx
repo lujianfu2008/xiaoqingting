@@ -1,3 +1,6 @@
+// Android WebView 壳兼容层：必须在一切业务 import 之前装
+// （桌面 preload 已注入 window.blm 时本模块整段跳过）。
+import "./blm/install";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

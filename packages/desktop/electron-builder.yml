@@ -28,9 +28,11 @@ files:
 # Local offline ASR: sherpa-onnx reads the Paraformer model from disk, so it
 # ships outside the asar. (The old vosk + standalone node.exe runtime is gone —
 # asr.ts now loads sherpa-onnx as a NAPI addon inside the main process.)
+# 语音模型不随安装包分发（省 ~83MB，安装包 174MB→约 95MB）：
+# 首次使用语音时从所连服务器 /download/models/ 下载到 userData；
+# 本地 models/ 仍可在 dev 下用（main/modelFetch.ts 的目录解析链）。
+# extraResources 仅留托盘图标。
 extraResources:
-  - from: models
-    to: models
   # Tray icon for 关闭按钮行为=托盘 (main/tray.ts reads resourcesPath/icon.ico).
   - from: build/icon.ico
     to: icon.ico
@@ -40,6 +42,9 @@ asarUnpack:
   - node_modules/**
 win:
   target: nsis
+  # 只留中英文语言包：Chromium 自带 55 个 pak 共 ~40MB（压缩后
+  # 7MB），本产品界面只有 zh-CN/en。
+  electronLanguages: ["zh-CN", "en-US"]
   # 交叉打包要先准备 Windows 原生包（npm 在 Linux 上会按 os 字段拒绝安装）：
   #   npm pack sherpa-onnx-win-x64@1.13.8 && tar xzf ... -C node_modules && \
   #   mv package node_modules/sherpa-onnx-win-x64

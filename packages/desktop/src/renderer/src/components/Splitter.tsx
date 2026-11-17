@@ -8,7 +8,9 @@ import { useT } from "../i18n";
 // view, which paints above the renderer).
 export function Splitter(props: {
   orientation?: "col" | "row";
-  onDrag(pos: number): void;
+  /** pos 是窗口坐标（clientX/clientY）；el 是拖动条元素，
+      供需要局部坐标的调用方换算（如量到某容器左缘的距离）。 */
+  onDrag(pos: number, el: HTMLElement): void;
   onReset(): void;
   onDragChange?(dragging: boolean): void;
   label: string;
@@ -43,7 +45,7 @@ export function Splitter(props: {
         e.preventDefault();
       }}
       onPointerMove={(e) => {
-        if (active.current) props.onDrag(row ? e.clientY : e.clientX);
+        if (active.current) props.onDrag(row ? e.clientY : e.clientX, e.currentTarget);
       }}
       onPointerUp={(e) => end(e.currentTarget, e.pointerId)}
       onPointerCancel={(e) => end(e.currentTarget, e.pointerId)}

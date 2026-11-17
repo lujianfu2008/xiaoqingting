@@ -223,13 +223,14 @@ export class ScheduleScheduler {
     this.notify(next);
   }
 
-  /** 专属会话：首触自动创建；绑定会话被用户删除后重建（title=任务名，天然不触发改题）。 */
+  /** 专属会话：首触自动创建；绑定会话被用户删除后重建（title=任务名，天然不触发改题）。
+   *  会话落进所属定时任务项目（缺省 = 默认空间，兼容旧数据）。 */
   private ensureSession(
     rec: ScheduleRecord,
   ): { session_id: string; meta: SessionMeta; recreated: boolean } | null {
     const existing = rec.session_id ? this.store.getSession(rec.session_id) : null;
     if (existing) return { session_id: existing.session_id, recreated: false, meta: toMeta(existing) };
-    const created = this.manager.createSession(rec.owner, rec.agent_id, rec.name, null);
+    const created = this.manager.createSession(rec.owner, rec.agent_id, rec.name, rec.project_id ?? null);
     if (!created) return null;
     return { session_id: created.session_id, recreated: true, meta: toMeta(created) };
   }

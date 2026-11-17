@@ -1,15 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import type { Block, ProjectMeta, SessionMeta, SessionSearchItem, TaskView } from "@blm/protocol";
+import type {
+  Block,
+  ProjectMeta,
+  ScheduleView,
+  SessionMeta,
+  SessionSearchItem,
+  TaskView,
+} from "@blm/protocol";
 import { useStore } from "../../store";
 import { apiBase } from "../../store/http";
 import { useT } from "../../i18n";
 import { blocksToMarkdown } from "../../lib/exportMarkdown";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { NewScheduleDialog } from "./NewScheduleDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 
 // My sessions grouped by project (default space last), then shared (read-only)
 // sessions. The share/delete buttons live inside each row; both stop
 // propagation so they don't select.
+// 项目组会话可展开/收起（点组头箭头）：全局同时最多展开两个项目，
+// 展开第三个时最早展开的自动收起；搜索过滤时强制全展开防命中被藏。
 
 // 搜索命中片段：snippet 里命中词以 ** 包裹，拆开渲染高亮。
 // 服务端已截好 ~60 字上下文，这里只做拆分。
@@ -34,11 +44,16 @@ function HighlightedSnippet({ snippet }: { snippet: string }): React.JSX.Element
 // 内容搜索结果行：会话标题 + 命中片段（高亮），点击进会话。
 function SearchHitRow({ item, q }: { item: SessionSearchItem; q: string }): React.JSX.Element {
   const selectSession = useStore((s) => s.selectSession);
+  const currentSessionId = useStore((s) => s.currentSessionId);
+  const sharedView = useStore((s) => s.sharedView);
   const t = useT();
   const first = item.matches[0];
   return (
     <div
-      className="session-item search-hit"
+      className={`session-item ${
+        item.session_id === currentSessionId && !sharedView ? "active" : ""
+      }`}
+      data-session-row={item.session_id}
       title={t("sess.hitCount", { count: item.total })}
       onClick={() => void selectSession(item.session_id)}
     >
@@ -96,6 +111,8 @@ function SessionRow({
     setEditing(false);
     if (title && title !== s.title) void renameSession(s.session_id, title);
   };
+  // tab 聚焦时按此锚点定位行（DOM 查询，不用逐层 ref）。
+  const rowAttr = { "data-session-row": s.session_id };
   // 导出为 Markdown：优先用内存 blocks，没加载过先拉一次历史。
   const exportSession = async (): Promise<void> => {
     const st = useStore.getState();
@@ -125,6 +142,7 @@ function SessionRow({
   };
   return (
     <div
+      {...rowAttr}
       className={`session-item ${active ? "active" : ""}`}
       onClick={() => void selectSession(s.session_id)}
       onContextMenu={
@@ -215,6 +233,110 @@ const groupHeaderStyle = {
   padding: "0 8px",
 } as const;
 
+// 定时任务紧凑行（项目组内）：名称/下次运行/立即执行/启停/打开会话/删除。
+// 整行可点进专属会话（行内按钮 stopPropagation 不抢）。
+function ScheduleRow({ rec }: { rec: ScheduleView }): React.JSX.Element {
+  const setScheduleEnabled = useStore((s) => s.setScheduleEnabled);
+  const deleteSchedule = useStore((s) => s.deleteSchedule);
+  const triggerSchedule = useStore((s) => s.triggerSchedule);
+  const selectSession = useStore((s) => s.selectSession);
+  const currentSessionId = useStore((s) => s.currentSessionId);
+  const sharedView = useStore((s) => s.sharedView);
+  const t = useT();
+  const doRemove = (): void => {
+    if (window.confirm(t("sc.deleteConfirm", { name: rec.name }))) {
+      void deleteSchedule(rec.schedule_id);
+    }
+  };
+  // 选中锚点：定时任务行代表其专属会话（rec.session_id 可能未建）。
+  const rowAttr = rec.session_id
+    ? { "data-session-row": rec.session_id }
+    : {};
+  // 立即执行：成功且服务端已建/绑定会话时顺带切过去（方便测试看结果）；
+  // 被跳过（不在线/忙）时如实轻提示。
+  const runNow = (): void => {
+    void triggerSchedule(rec.schedule_id)
+      .then((updated) => {
+        if (updated.last_result === "skipped") {
+          const reason =
+            updated.last_skip_reason === "owner_offline"
+              ? t("sc.reasonOwnerOffline")
+              : updated.last_skip_reason === "session_busy"
+                ? t("sc.reasonSessionBusy")
+                : t("sc.reasonUserDisabled");
+          useStore.setState({ error: t("sc.runSkipped", { reason }) });
+          return;
+        }
+        if (updated.session_id) void selectSession(updated.session_id);
+      })
+      .catch(() => useStore.setState({ error: t("sc.saveFail") }));
+  };
+  return (
+    <div
+      {...rowAttr}
+      className={`session-item ${
+        rec.session_id && rec.session_id === currentSessionId && !sharedView
+          ? "active"
+          : ""
+      } ${rec.session_id ? "" : "disabled"}`}
+      style={{ opacity: rec.enabled ? 1 : 0.55 }}
+      title={rec.prompt.length > 80 ? `${rec.prompt.slice(0, 80)}…` : rec.prompt}
+      onClick={() => {
+        if (rec.session_id) void selectSession(rec.session_id);
+      }}
+    >
+      <span className="title">⏰ {rec.name}</span>
+      <span style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap" }}>
+        {rec.next_run_at
+          ? new Date(rec.next_run_at).toLocaleString()
+          : t("sc.neverRun")}
+      </span>
+      <button
+        className="del"
+        title={t("sc.runNow")}
+        onClick={(e) => {
+          e.stopPropagation();
+          runNow();
+        }}
+      >
+        ⚡
+      </button>
+      <button
+        className="del"
+        title={rec.enabled ? t("sc.enabled") : t("sc.neverRun")}
+        onClick={(e) => {
+          e.stopPropagation();
+          void setScheduleEnabled(rec.schedule_id, !rec.enabled);
+        }}
+      >
+        {rec.enabled ? "⏸" : "▶"}
+      </button>
+      {rec.session_id && (
+        <button
+          className="del"
+          title={t("sc.openSession")}
+          onClick={(e) => {
+            e.stopPropagation();
+            void selectSession(rec.session_id!);
+          }}
+        >
+          →
+        </button>
+      )}
+      <button
+        className="del"
+        title={t("sc.delete")}
+        onClick={(e) => {
+          e.stopPropagation();
+          doRemove();
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
 // 共享行的小红点（内联组件：list 顶层订阅 busy 会随任何会话
 // 的回合结束整表重渲；组件级订阅只重渲变化的那几行）。
 function SessionBusyDot({ sessionId }: { sessionId: string }): React.JSX.Element | null {
@@ -262,8 +384,10 @@ function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
     .filter((s) => s.assignee)
     .map((s) => `${s.name}: ${s.assignee}`)
     .join(" · ");
+  const rowAttr = { "data-session-row": task.session_id };
   return (
     <div
+      {...rowAttr}
       className={`session-item ${task.session_id === currentSessionId ? "active" : ""}`}
       style={done ? { opacity: 0.55 } : undefined}
       title={`${t("task.roleRequester")}: ${task.requester}${assignees ? ` · ${assignees}` : ""}`}
@@ -308,23 +432,35 @@ function TaskRow({ task }: { task: TaskView }): React.JSX.Element {
 function ProjectGroup({
   project,
   sessions,
+  expanded,
+  onToggle,
+  onExpand,
   onShare,
   onMoveMenu,
   onSettings,
+  onNewTask,
+  onNewSchedule,
 }: {
   project: ProjectMeta;
   sessions: SessionMeta[];
+  expanded: boolean;
+  onToggle: () => void;
+  onExpand: () => void;
   onShare: (sessionId: string) => void;
   onMoveMenu?: (sessionId: string, x: number, y: number) => void;
   onSettings: () => void;
+  onNewTask: () => void;
+  onNewSchedule: () => void;
 }): React.JSX.Element {
   const currentSessionId = useStore((s) => s.currentSessionId);
   const sharedView = useStore((s) => s.sharedView);
   const newSession = useStore((s) => s.newSession);
   const deleteProject = useStore((s) => s.deleteProject);
   const role = useStore((s) => s.role);
+  const schedules = useStore((s) => s.schedules);
   const t = useT();
   const isPublic = project.visibility === "public";
+  const kind = project.kind ?? "standard";
 
   // undefined = not queried yet; null = unbound on this machine.
   const [folder, setFolder] = useState<string | null | undefined>(undefined);
@@ -347,9 +483,30 @@ function ProjectGroup({
       });
   };
 
+  // 组头图标按类型区分：📁 普通 / 🤝 协作 / ⏰ 定时 / 🌐 公域。
+  const kindIcon = isPublic ? "🌐" : kind === "collab" ? "🤝" : kind === "scheduled" ? "⏰" : "📁";
+  const delConfirm =
+    kind === "scheduled"
+      ? t("proj.deleteScheduledConfirm", {
+          name: project.name,
+          count: schedules.filter((r) => r.project_id === project.project_id).length,
+        })
+      : isPublic
+        ? t("proj.deletePublicConfirm", { name: project.name })
+        : t("proj.deleteConfirm", { name: project.name });
+
   return (
     <>
-      <div style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", gap: 4 }}>
+      <div className="project-group-head" style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", gap: 4 }}>
+        {/* 箭头展开/收起：上限与淘汰逻辑由父层统一执行。
+            常显（唯一入口，藏进悬停会让收起的组找不到出口）。 */}
+        <button
+          className="del always"
+          title={t("proj.expandTip")}
+          onClick={onToggle}
+        >
+          {expanded ? "▾" : "▸"}
+        </button>
         <span
           style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           title={
@@ -360,7 +517,7 @@ function ProjectGroup({
                 : t("proj.unboundTip")
           }
         >
-          {isPublic ? "🌐" : "📁"} {project.name}
+          {kindIcon} {project.name}
           {!isPublic && folder === null && (
             <span style={{ color: "var(--warn)" }}>{t("proj.unbound")}</span>
           )}
@@ -377,22 +534,48 @@ function ProjectGroup({
         <button className="del" title={t("proj.settings")} onClick={onSettings}>
           ⚙
         </button>
-        <button
-          className="del"
-          title={t("proj.newSession", { name: project.name })}
-          onClick={() => void newSession(project.agent_id, project.project_id)}
-        >
-          ＋
-        </button>
+        {/* 组内 ＋ 按类型分流：协作项目 = 新建任务；定时项目 = 新建定时任务；
+            其余 = 新建普通会话。三者都先保证组展开，避免新条目落进折叠组。 */}
+        {kind === "collab" ? (
+          <button
+            className="del"
+            title={t("task.newTitle")}
+            onClick={() => {
+              onExpand();
+              onNewTask();
+            }}
+          >
+            ＋
+          </button>
+        ) : kind === "scheduled" ? (
+          <button
+            className="del"
+            title={t("proj.newSchedule")}
+            onClick={() => {
+              onExpand();
+              onNewSchedule();
+            }}
+          >
+            ＋
+          </button>
+        ) : (
+          <button
+            className="del"
+            title={t("proj.newSession", { name: project.name })}
+            onClick={() => {
+              onExpand();
+              void newSession(project.agent_id, project.project_id);
+            }}
+          >
+            ＋
+          </button>
+        )}
         {(role === "admin" || !isPublic) && (
           <button
             className="del"
             title={isPublic ? t("proj.deletePublic") : t("proj.delete")}
             onClick={() => {
-              const tip = isPublic
-                ? t("proj.deletePublicConfirm", { name: project.name })
-                : t("proj.deleteConfirm", { name: project.name });
-              if (window.confirm(tip)) {
+              if (window.confirm(delConfirm)) {
                 void deleteProject(project.project_id);
               }
             }}
@@ -401,30 +584,67 @@ function ProjectGroup({
           </button>
         )}
       </div>
-      {project.description && (
-        <div
-          title={project.description}
-          style={{
-            margin: "0 8px 2px",
-            fontSize: 11,
-            color: "var(--muted)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {project.description}
+      {/* 组头图标按类型区分：📁 普通 / 🤝 协作 / ⏰ 定时 / 🌐 公域。 */}
+      {/* 组内容器：相对组头缩进（从属层级），四类项目一致。
+          定时任务项目再深一层：⏰ 任务行下缩进挂其专属会话（运行
+          记录从属于宿主任务），无宿主的会话留在组级。 */}
+      {expanded && kind === "scheduled" && (() => {
+        const projScheds = schedules.filter(
+          (r) => r.project_id === project.project_id,
+        );
+        const boundIds = new Set(
+          projScheds.map((r) => r.session_id).filter((id): id is string => !!id),
+        );
+        const orphans = sessions.filter(
+          (s) => !boundIds.has(s.session_id),
+        );
+        return (
+          <div style={{ paddingLeft: 14 }}>
+            {projScheds.map((rec) => (
+              <div key={rec.schedule_id}>
+                <ScheduleRow rec={rec} />
+                {rec.session_id && (
+                  <div style={{ paddingLeft: 14 }}>
+                    {sessions
+                      .filter((s) => s.session_id === rec.session_id)
+                      .map((s) => (
+                        <SessionRow
+                          key={s.session_id}
+                          s={s}
+                          active={s.session_id === currentSessionId && !sharedView}
+                          onShare={onShare}
+                          onMoveMenu={onMoveMenu}
+                        />
+                      ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {orphans.map((s) => (
+              <SessionRow
+                key={s.session_id}
+                s={s}
+                active={s.session_id === currentSessionId && !sharedView}
+                onShare={onShare}
+                onMoveMenu={onMoveMenu}
+              />
+            ))}
+          </div>
+        );
+      })()}
+      {expanded && kind !== "scheduled" && (
+        <div style={{ paddingLeft: 14 }}>
+          {sessions.map((s) => (
+            <SessionRow
+              key={s.session_id}
+              s={s}
+              active={s.session_id === currentSessionId && !sharedView}
+              onShare={onShare}
+              onMoveMenu={onMoveMenu}
+            />
+          ))}
         </div>
       )}
-      {sessions.map((s) => (
-        <SessionRow
-          key={s.session_id}
-          s={s}
-          active={s.session_id === currentSessionId && !sharedView}
-          onShare={onShare}
-          onMoveMenu={onMoveMenu}
-        />
-      ))}
     </>
   );
 }
@@ -440,6 +660,8 @@ export function SessionList({
   const projects = useStore((s) => s.projects);
   const sharedSessions = useStore((s) => s.sharedSessions);
   const tasks = useStore((s) => s.tasks);
+  const schedules = useStore((s) => s.schedules);
+  const loadSchedules = useStore((s) => s.loadSchedules);
   const currentSessionId = useStore((s) => s.currentSessionId);
   const sharedView = useStore((s) => s.sharedView);
   const selectSharedSession = useStore((s) => s.selectSharedSession);
@@ -447,8 +669,60 @@ export function SessionList({
   const moveSession = useStore((s) => s.moveSession);
   const t = useT();
 
-  // 协作任务分区 + 「＋新任务」弹窗。
+  // 定时任务行数据（⏰）进侧边栏，挂载时播种一次（WS 增量照常）。
+  useEffect(() => {
+    void loadSchedules();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 协作任务分区 + 「＋新任务」弹窗（全局入口 + 协作项目组内入口）。
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newTaskProject, setNewTaskProject] = useState<ProjectMeta | null>(null);
+  // 定时任务项目组内「＋新建定时任务」。
+  const [newScheduleProject, setNewScheduleProject] = useState<ProjectMeta | null>(null);
+
+  // 项目组展开状态（FIFO 淘汰）：同时最多展开 2 个项目，展开第 3 个
+  // 时最早展开的自动收起；搜索时强制全展开（命中会话不能被折叠藏掉）。
+  // 会话搜索（标题纯客户端 + 内容走服务端）：命中标题或共享会话的
+  // owner 即过滤列表；输入 ≥1 字时同时触发内容全文搜索（300ms 防抖）。
+  const [query, setQuery] = useState("");
+  const MAX_EXPANDED = 2;
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const searchActive = query.trim() !== "";
+  const isExpanded = (id: string): boolean =>
+    searchActive || expandedIds.includes(id);
+  const toggleExpand = (id: string): void => {
+    setExpandedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id].slice(-MAX_EXPANDED),
+    );
+  };
+  // 保证展开（不收起已展开的）：组内 ＋ 新建前调用，否则新会话会落进折叠组里看不见。
+  const expandOnly = (id: string): void => {
+    setExpandedIds((prev) =>
+      prev.includes(id) ? prev : [...prev, id].slice(-MAX_EXPANDED),
+    );
+  };
+
+  // 与头顶 tab 联动：tab 聚焦某会话时，其所在项目组自动展开
+  // （折叠组里的选中行等于藏掉了），并把选中行滚进视野。
+  // 行定位走 DOM 查询（data-session-row），不给每层组件塞 ref。
+  // 从列表点选的会话必然可见，用 lastFollowed 跳过追焦。
+  const lastFollowed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentSessionId) return;
+    if (lastFollowed.current === currentSessionId) return;
+    lastFollowed.current = currentSessionId;
+    const projId = sessions.find((s) => s.session_id === currentSessionId)?.project_id;
+    if (projId && known.has(projId)) expandOnly(projId);
+    // 组展开是异步渲染：下一帧再找行滚动（找不到 = 该会话不在
+    // 本人列表里，如内容搜索行，跳过即可）。
+    const raf = requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-session-row="${currentSessionId}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [currentSessionId, sessions]);
 
   // Right-click "move to project" menu state (viewport coords).
   const [moveMenu, setMoveMenu] = useState<{
@@ -458,9 +732,6 @@ export function SessionList({
   } | null>(null);
   // Which project's settings dialog is open (null = none).
   const [settingsFor, setSettingsFor] = useState<ProjectMeta | null>(null);
-  // 会话搜索（标题纯客户端 + 内容走服务端）：命中标题或共享会话的
-  // owner 即过滤列表；输入 ≥1 字时同时触发内容全文搜索（300ms 防抖）。
-  const [query, setQuery] = useState("");
   const [contentHits, setContentHits] = useState<SessionSearchItem[] | null>(null);
   const [searching, setSearching] = useState(false);
   const q = query.trim().toLowerCase();
@@ -509,8 +780,12 @@ export function SessionList({
     (item) => !sessions.some((s) => s.session_id === item.session_id && matchSession(s)),
   );
 
-  // 公有域项目单独分区展示（工作空间在服务端，而非本机文件夹）。
+  // 公有域项目单独分区展示（工作空间在服务端，而非本机文件夹）；
+  // 个人项目再按类型分三段（普通/协作/定时）。
   const personalProjects = projects.filter((p) => p.visibility !== "public");
+  const standardProjects = personalProjects.filter((p) => (p.kind ?? "standard") === "standard");
+  const collabProjects = personalProjects.filter((p) => p.kind === "collab");
+  const scheduledProjects = personalProjects.filter((p) => p.kind === "scheduled");
   const publicProjects = projects.filter((p) => p.visibility === "public");
 
   const byProject = new Map<string, SessionMeta[]>();
@@ -528,8 +803,16 @@ export function SessionList({
   }
   // 只在搜索时隐藏空分组（没有命中会话的项目不显示）；平时新项目 0 个会话也要显示。
   const emptyGroup = (p: ProjectMeta): boolean => (byProject.get(p.project_id) ?? []).length === 0;
-  const visiblePersonal = q ? personalProjects.filter((p) => !emptyGroup(p)) : personalProjects;
-  const visiblePublic = q ? publicProjects.filter((p) => !emptyGroup(p)) : publicProjects;
+  // 定时任务项目即使还没有会话，也要在有定时任务时显示组。
+  const hasSchedules = (p: ProjectMeta): boolean =>
+    (p.kind ?? "standard") === "scheduled" &&
+    schedules.some((r) => r.project_id === p.project_id);
+  const groupVisible = (p: ProjectMeta): boolean =>
+    !q || !emptyGroup(p) || hasSchedules(p);
+  const visiblePersonal = standardProjects.filter(groupVisible);
+  const visibleCollab = collabProjects.filter(groupVisible);
+  const visibleScheduled = scheduledProjects.filter(groupVisible);
+  const visiblePublic = publicProjects.filter(groupVisible);
   // 协作任务：活跃在前、done 灰显（listTasks 已按 updated_at 倒序）。
   const visibleTasks = tasks.filter((task) => !q || task.title.toLowerCase().includes(q));
   const activeTasks = visibleTasks.filter((task) => task.status !== "done");
@@ -541,6 +824,8 @@ export function SessionList({
   const nothingVisible =
     q !== "" &&
     visiblePersonal.length === 0 &&
+    visibleCollab.length === 0 &&
+    visibleScheduled.length === 0 &&
     visiblePublic.length === 0 &&
     def.length === 0 &&
     visibleShared.length === 0 &&
@@ -586,14 +871,68 @@ export function SessionList({
         {t("proj.newProject")}
       </button>
 
+      {/* 项目组相对其所在分区缩进（分区头 → 组头 → 内容三层）。 */}
+      <div style={{ paddingLeft: 14 }}>
       {visiblePersonal.map((p) => (
         <ProjectGroup
           key={p.project_id}
           project={p}
           sessions={byProject.get(p.project_id) ?? []}
+          expanded={isExpanded(p.project_id)}
+          onToggle={() => toggleExpand(p.project_id)}
+          onExpand={() => expandOnly(p.project_id)}
           onShare={onShare}
           onMoveMenu={(id, x, y) => setMoveMenu({ sessionId: id, x, y })}
           onSettings={() => setSettingsFor(p)}
+          onNewTask={() => {
+            setNewTaskProject(null);
+            setNewTaskOpen(true);
+          }}
+          onNewSchedule={() => setNewScheduleProject(p)}
+        />
+      ))}
+
+      {visibleCollab.length > 0 && (
+        <div style={groupHeaderStyle}>{t("proj.sectionCollab")}</div>
+      )}
+      {visibleCollab.map((p) => (
+        <ProjectGroup
+          key={p.project_id}
+          project={p}
+          sessions={byProject.get(p.project_id) ?? []}
+          expanded={isExpanded(p.project_id)}
+          onToggle={() => toggleExpand(p.project_id)}
+          onExpand={() => expandOnly(p.project_id)}
+          onShare={onShare}
+          onMoveMenu={(id, x, y) => setMoveMenu({ sessionId: id, x, y })}
+          onSettings={() => setSettingsFor(p)}
+          onNewTask={() => {
+            setNewTaskProject(p);
+            setNewTaskOpen(true);
+          }}
+          onNewSchedule={() => setNewScheduleProject(p)}
+        />
+      ))}
+
+      {visibleScheduled.length > 0 && (
+        <div style={groupHeaderStyle}>{t("proj.sectionScheduled")}</div>
+      )}
+      {visibleScheduled.map((p) => (
+        <ProjectGroup
+          key={p.project_id}
+          project={p}
+          sessions={byProject.get(p.project_id) ?? []}
+          expanded={isExpanded(p.project_id)}
+          onToggle={() => toggleExpand(p.project_id)}
+          onExpand={() => expandOnly(p.project_id)}
+          onShare={onShare}
+          onMoveMenu={(id, x, y) => setMoveMenu({ sessionId: id, x, y })}
+          onSettings={() => setSettingsFor(p)}
+          onNewTask={() => {
+            setNewTaskProject(null);
+            setNewTaskOpen(true);
+          }}
+          onNewSchedule={() => setNewScheduleProject(p)}
         />
       ))}
 
@@ -605,26 +944,37 @@ export function SessionList({
           key={p.project_id}
           project={p}
           sessions={byProject.get(p.project_id) ?? []}
+          expanded={isExpanded(p.project_id)}
+          onToggle={() => toggleExpand(p.project_id)}
+          onExpand={() => expandOnly(p.project_id)}
           onShare={onShare}
           onMoveMenu={(id, x, y) => setMoveMenu({ sessionId: id, x, y })}
           onSettings={() => setSettingsFor(p)}
+          onNewTask={() => {
+            setNewTaskProject(null);
+            setNewTaskOpen(true);
+          }}
+          onNewSchedule={() => setNewScheduleProject(p)}
         />
       ))}
+      </div>
 
       {def.length > 0 && <div style={groupHeaderStyle}>{t("sess.defaultSpace")}</div>}
-      {def.map((s) => (
-        <SessionRow
-          key={s.session_id}
-          s={s}
-          active={s.session_id === currentSessionId && !sharedView}
-          onShare={onShare}
-          onMoveMenu={(id, x, y) => setMoveMenu({ sessionId: id, x, y })}
-        />
-      ))}
+      <div style={{ paddingLeft: 14 }}>
+        {def.map((s) => (
+          <SessionRow
+            key={s.session_id}
+            s={s}
+            active={s.session_id === currentSessionId && !sharedView}
+            onShare={onShare}
+            onMoveMenu={(id, x, y) => setMoveMenu({ sessionId: id, x, y })}
+          />
+        ))}
+      </div>
 
       {/* 协作任务（需求 → 研发 → 测试）：线程入口集中在此；共享分区不再重复展示。 */}
       {(visibleTasks.length > 0 || !q) && (
-        <div style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", gap: 4, marginTop: 12 }}>
+        <div className="project-group-head" style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", gap: 4, marginTop: 12 }}>
           <span style={{ flex: 1 }}>🧭 {t("task.section")}</span>
           <button
             className="del"
@@ -635,18 +985,34 @@ export function SessionList({
           </button>
         </div>
       )}
-      {activeTasks.map((task) => (
-        <TaskRow key={task.task_id} task={task} />
-      ))}
-      {doneTasks.length > 0 && (
-        <div style={{ fontSize: 11, color: "var(--muted)", padding: "2px 8px" }}>
-          {t("task.doneHeader")}
-        </div>
+      <div style={{ paddingLeft: 14 }}>
+        {activeTasks.map((task) => (
+          <TaskRow key={task.task_id} task={task} />
+        ))}
+        {doneTasks.length > 0 && (
+          <div style={{ fontSize: 11, color: "var(--muted)", padding: "2px 8px" }}>
+            {t("task.doneHeader")}
+          </div>
+        )}
+        {doneTasks.map((task) => (
+          <TaskRow key={task.task_id} task={task} />
+        ))}
+      </div>
+      {newTaskOpen && (
+        <NewTaskDialog
+          project={newTaskProject ?? undefined}
+          onClose={() => {
+            setNewTaskOpen(false);
+            setNewTaskProject(null);
+          }}
+        />
       )}
-      {doneTasks.map((task) => (
-        <TaskRow key={task.task_id} task={task} />
-      ))}
-      {newTaskOpen && <NewTaskDialog onClose={() => setNewTaskOpen(false)} />}
+      {newScheduleProject && (
+        <NewScheduleDialog
+          project={newScheduleProject}
+          onClose={() => setNewScheduleProject(null)}
+        />
+      )}
 
       {/* 会话内容搜索结果（含只命中内容、标题未中的会话）。 */}
       {q !== "" && contentOnly.length > 0 && (
@@ -674,27 +1040,30 @@ export function SessionList({
           {t("sess.sharedHeader")}
         </div>
       )}
-      {visibleShared.map((s) => {
-        const online = s.owner ? (presence[s.owner] ?? s.owner_online ?? false) : false;
-        return (
-          <div
-            key={s.session_id}
-            className={`session-item ${s.session_id === currentSessionId && sharedView ? "active" : ""}`}
-            title={t("sess.viewTip", { owner: s.owner ?? "", online: online ? t("chat.ownerOnline") : t("chat.ownerOffline") })}
-            onClick={() => void selectSharedSession(s.session_id)}
-          >
-            <SessionBusyDot sessionId={s.session_id} />
-            <span className="title">
-              {s.owner} / {s.title}
-            </span>
-            <span
-              className={`status-dot ${online ? "ok" : "bad"}`}
-              title={online ? t("chat.ownerOnline") : t("chat.ownerOffline")}
-            />
-            {!online && <span className="offline-tip">{t("sess.offline")}</span>}
-          </div>
-        );
-      })}
+      <div style={{ paddingLeft: 14 }}>
+        {visibleShared.map((s) => {
+          const online = s.owner ? (presence[s.owner] ?? s.owner_online ?? false) : false;
+          return (
+            <div
+              key={s.session_id}
+              data-session-row={s.session_id}
+              className={`session-item ${s.session_id === currentSessionId && sharedView ? "active" : ""}`}
+              title={t("sess.viewTip", { owner: s.owner ?? "", online: online ? t("chat.ownerOnline") : t("chat.ownerOffline") })}
+              onClick={() => void selectSharedSession(s.session_id)}
+            >
+              <SessionBusyDot sessionId={s.session_id} />
+              <span className="title">
+                {s.owner} / {s.title}
+              </span>
+              <span
+                className={`status-dot ${online ? "ok" : "bad"}`}
+                title={online ? t("chat.ownerOnline") : t("chat.ownerOffline")}
+              />
+              {!online && <span className="offline-tip">{t("sess.offline")}</span>}
+            </div>
+          );
+        })}
+      </div>
 
       {/* Right-click menu: move one of my sessions into another project (or
           back to the default space). Click-anywhere overlay closes it. */}

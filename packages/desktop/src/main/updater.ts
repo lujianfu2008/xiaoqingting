@@ -1,4 +1,8 @@
 import { autoUpdater } from "electron-updater";
+// electron-updater 依赖自己的 builder-util-runtime 副本
+// （npm 去重后顶层的与此不同构）——CancellationToken 必须
+// 从它真正消费的包导入，否则类型不兼容。
+import { CancellationToken } from "electron-updater/node_modules/builder-util-runtime";
 import { BrowserWindow, dialog } from "electron";
 import { uiStrings } from "./i18n";
 import { currentLanguage } from "./menu";
@@ -30,7 +34,16 @@ export type UpdateProgressState = {
 
 let lastPush = 0;
 
+// 当前下载的取消令牌：update-available 时换发新令牌，
+// 用户点浮条 ✕ 时 cancel（中断下载，浮条隐藏）。
+let downloadToken: CancellationToken | null = null;
+
+// 用户点 ✕ 后进度推送静默；新一轮检查（update-available →
+// resetProgress）解除。收尾的 idle 推送不经这里（直接 send）。
+let hidden = false;
+
 function pushProgress(state: UpdateProgressState): void {
+  if (hidden) return;
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("blm:updater:progress", state);
   }
@@ -58,8 +71,27 @@ function onDownloadProgress(info: {
 
 function resetProgress(): void {
   lastPush = 0;
+  hidden = false;
   pushProgress({ phase: "downloading", percent: 0 });
 }
+
+/** 取消下载并隐藏浮条（renderer 点 ✕ 走这一步）：cancel 当前
+ *  令牌——electron-updater 中断下载并 emit update-cancelled；
+ *  无在途下载时静默隐藏即可。 */
+export function cancelAndHide(): void {
+  hidden = true;
+  downloadToken?.cancel();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed())
+      win.webContents.send("blm:updater:progress", { phase: "idle", percent: 0 });
+  }
+}
+
+// 下载自管：autoDownload 关掉——发现新版本后由 wireEvents
+// 的 update-available 监听持令牌调 downloadUpdate(token)，
+// 取消走 token.cancel()（内部令牌拿不到引用，只有自管才能
+// 中断下载）。
+autoUpdater.autoDownload = false;
 
 /** renderer 登录后调用：绑定更新源并检查一次（同一服务器只配一次）。 */
 export function bindUpdater(serverUrl: string): void {
@@ -69,7 +101,8 @@ export function bindUpdater(serverUrl: string): void {
   // generic provider：读 latest.yml 定版本，差量按 blockmap 走。
   autoUpdater.setFeedURL({ provider: "generic", url: feed, channel: "latest" });
   wireEvents();
-  // 启动即查；老服务端 404/网络不通都静默。
+  // 启动即查；发现新版本由事件监听起下载。老服务端 404/
+  // 网络不通都静默。
   void autoUpdater.checkForUpdates().catch(() => undefined);
 }
 
@@ -96,6 +129,8 @@ export function checkNow(): Promise<"up_to_date" | "available" | "error"> {
     autoUpdater.on("update-available", onAvail);
     autoUpdater.on("update-not-available", onNone);
     autoUpdater.on("error", onErr);
+    // 发现新版本时 downloadUpdate 由 update-available 监听里
+    // 启动（见 wireEvents），这里只管检查结果。
     void autoUpdater.checkForUpdates().catch(() => settle("error"));
   });
 }
@@ -128,12 +163,28 @@ function wireEvents(): void {
         once = false;
       });
   });
-  // 新检查开始时进度归零（重复更新同一版本也可能重下）。
-  autoUpdater.on("update-available", resetProgress);
+  // 新检查发现新版本：进度归零（重复更新同一版本也可能重下），
+  // 换发新取消令牌并启动下载（autoDownload 已关，下载在这里手动起）。
+  autoUpdater.on("update-available", () => {
+    hidden = false;
+    downloadToken = new CancellationToken();
+    resetProgress();
+    // 下载失败/取消走 error/update-cancelled 事件，这里不 await。
+    void autoUpdater.downloadUpdate(downloadToken).catch(() => undefined);
+  });
+  // 用户取消：收掉浮条（electron-updater 已中断下载）。
+  autoUpdater.on("update-cancelled", () => {
+    downloadToken = null;
+    pushProgress({ phase: "idle", percent: 0 });
+  });
   // 检查失败/无新版：把进度条收掉（error 可能来自下载中断）。
-  autoUpdater.on("update-not-available", () =>
-    pushProgress({ phase: "idle", percent: 0 }),
-  );
+  autoUpdater.on("update-not-available", () => {
+    downloadToken = null;
+    pushProgress({ phase: "idle", percent: 0 });
+  });
   // 出错静默：更新是后台 best-effort，不打扰使用；进度条一并收掉。
-  autoUpdater.on("error", () => pushProgress({ phase: "idle", percent: 0 }));
+  autoUpdater.on("error", () => {
+    downloadToken = null;
+    pushProgress({ phase: "idle", percent: 0 });
+  });
 }

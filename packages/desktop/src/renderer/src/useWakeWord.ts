@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "./store";
 import { startWakeListener, type WakeListener } from "./wakeListener";
 import { t } from "./i18n";
@@ -52,8 +52,22 @@ export function useWakeWord(): void {
   // 连续对话：静默退出时限（时间戳）与「门何时打开」（宽限用）。
   const contExpireAtRef = useRef(0);
   const contGateSinceRef = useRef(Date.now());
+  // 模型就绪推送的版本号：新装版模型是按需下载的，登录后第一次
+  // 配置唤醒多半赶在模型到位前（报错只在设置面板显示），模型
+  // 下载完成必须再触发一次重建，否则唤醒永远静默失效。
+  const [modelReadyTick, setModelReadyTick] = useState(0);
+  // 设备僵死重建计数：onDead 触发后 bump，整条重建 effect 重跑
+  //（重新 getUserMedia 换回有效设备）。
+  const [rebuildTick, setRebuildTick] = useState(0);
 
   // 命中事件订阅只挂一次；回调只碰 ref / IPC，无需随状态重挂。
+  useEffect(() => {
+    const off = window.blm.onModelState((s) => {
+      if (s.ready) setModelReadyTick((v) => v + 1);
+    });
+    return off;
+  }, []);
+
   useEffect(() => {
     return window.blm.onWakeDetected((keyword) => {
       lastDetectedRef.current = Date.now();
@@ -92,8 +106,8 @@ export function useWakeWord(): void {
       const gated =
         s.recording ||
         s.speaking ||
-        s.pendingPermission ||
-        s.pendingExec ||
+        s.pendingPermission.length > 0 ||
+        s.pendingExec.length > 0 ||
         (sid ? (s.busy[sid] ?? false) : false);
       const now = Date.now();
       if (gated) {
@@ -143,11 +157,14 @@ export function useWakeWord(): void {
           isActive: () => {
             const s = useStore.getState();
             if (s.recording || s.speaking) return false; // 录音中/朗读中不听
-            if (s.pendingPermission || s.pendingExec) return false; // 确认弹窗打开时不听
+            if (s.pendingPermission.length > 0 || s.pendingExec.length > 0) {
+              return false; // 确认弹窗打开时不听
+            }
             // 智能体回复中也继续监听：语音补充会并入当前回合（与文字一致），
             // 不必把用户晾到回复结束。
             return Date.now() - lastDetectedRef.current >= COOLDOWN_MS;
           },
+          onDead: () => setRebuildTick((v) => v + 1),
         });
         if (!listenerRef.current) useStore.getState().setWakeError(t("vm.micDenied"));
       })();
@@ -158,7 +175,7 @@ export function useWakeWord(): void {
       // 唤醒重建/卸载时连续对话一并退出（重建后从待唤醒重新开始）。
       useStore.getState().setContinuousVoice(false);
     };
-  }, [token, wakeEnabled, wakeWords, wakeSensitivity]);
+  }, [token, wakeEnabled, wakeWords, wakeSensitivity, modelReadyTick, rebuildTick]);
 
   // 卸载兜底：不留麦克风。
   useEffect(

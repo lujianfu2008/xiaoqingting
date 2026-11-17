@@ -37,8 +37,14 @@ export function handleConnection(
   const send = (msg: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
   };
-  const unregister = manager.registerConnection(payload.uid, send, () =>
-    socket.close(4003, "account_disabled"),
+  // kind=mobile：手机壳连接（无本机执行能力），执行请求优先
+  // 派给同账号桌面连接（见 connections.ts broadcast）。
+  const kind = url.searchParams.get("kind") === "mobile" ? "mobile" : undefined;
+  const unregister = manager.registerConnection(
+    payload.uid,
+    send,
+    () => socket.close(4003, "account_disabled"),
+    kind,
   );
 
   // 协议层探活：客户端对 ping 帧自动回 pong（应用层无感知）。判定死链
@@ -93,7 +99,15 @@ export function handleConnection(
       return;
     }
     const msg = ClientMessage.safeParse(parsed);
-    if (!msg.success) return;
+    if (!msg.success) {
+      // 静默丢弃会把「客户端发了但服务端不认」变成永久谜团
+      // （诊断回执就整批消失过）。至少留个痕：只记类型与首错。
+      const t = (parsed as { type?: string } | null)?.type;
+      console.warn(
+        `[ws] dropped invalid ${t ?? "?"} message from ${payload.uid}: ${msg.error.issues[0]?.path.join(".")} ${msg.error.issues[0]?.message}`,
+      );
+      return;
+    }
 
     switch (msg.data.type) {
       case "user_message":
@@ -124,6 +138,9 @@ export function handleConnection(
             images: msg.data.images,
           },
         );
+        break;
+      case "diag_result":
+        manager.handleDiagResult(payload.uid, msg.data.result);
         break;
       case "ping":
         socket.send(JSON.stringify({ type: "pong" }));

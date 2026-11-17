@@ -39,15 +39,27 @@ export function BrowserPane(props: {
       const r = stage.getBoundingClientRect();
       // Any overlay (settings / share / permission dialogs) must cover the
       // window, but a native view always paints on top — hide it instead.
+      // 遮罩/拖拽隐藏时仍上报真实几何 + covered 标记：main
+      // 只记不摆（view 照旧藏），诊断摘要不会把「弹窗开着」
+      // 误读成「页面失踪（0 尺寸）」。
       const covered = document.querySelector(".overlay") !== null;
       const visible = !covered && !suspended && r.width >= 40 && r.height >= 40;
       void window.blm.browser.setBounds(
         visible
           ? { x: r.left, y: r.top, width: r.width, height: r.height }
-          : { x: 0, y: 0, width: 0, height: 0 },
+          : { x: r.left, y: r.top, width: r.width, height: r.height, covered: true },
       );
-    };
-    const sync = (): void => {
+      // 高分屏 DPI 排障：把渲染层视口一并带给主进程——
+      // 主进程对照窗口内容区尺寸，不一致即「窗口 DPI 上下文
+      // 与屏幕缩放分叉」（非整数缩放/改缩放未重启的高发坑，
+      // 表现为 pane 满/放大时右、下成片空白），主进程据此
+      // 重同步窗口。诊断摘要也用它核对渲染层坐标系。
+      void window.blm.browser.setViewport?.({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        dpr: window.devicePixelRatio,
+      }).catch(() => undefined);
+    };    const sync = (): void => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(push);
     };
@@ -59,9 +71,21 @@ export function BrowserPane(props: {
     mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     window.addEventListener("resize", sync);
     sync();
+    // 自愈兜底：view 由主进程按我们上报的 rect 摆位，若首推与
+    // 首帧布局之间有竞态（view 已按旧 rect 画出），仅靠首次
+    // sync 收不回来。延后一拍再推一次，把页面钉准。
+    const settle = setTimeout(sync, 120);
+    // 周期对账兜底：max/full 切换、窗口缩放、高分屏取整
+    // 等路径下若任一事件与原生 view 重摆交错，view 会停在
+    // 旧 rect（pane 长大了、页面没跟上 = 右/下空白）。
+    // 事件驱动收不齐就按时间兜——每秒推一次真实 rect，
+    // 主进程 same 短路，无变化零开销。
+    const beat = setInterval(sync, 1000);
 
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(settle);
+      clearInterval(beat);
       ro.disconnect();
       mo.disconnect();
       window.removeEventListener("resize", sync);

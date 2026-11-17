@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WorkflowStage } from "./workflows.js";
 
 // ---------- Session / agent metadata ----------
 
@@ -46,6 +47,18 @@ export type AgentInfo = z.infer<typeof AgentInfo>;
 
 // ---------- Project (a named space grouping sessions) ----------
 
+// 项目类型：standard = 普通分类空间；collab = 协作任务空间（项目级
+// 工作流环节，会话承载协作任务）；scheduled = 定时任务空间（一组定时
+// 任务，触发时在该项目下建专属会话）。缺省 = standard（兼容旧数据）。
+export const ProjectKind = z.enum(["standard", "collab", "scheduled"]);
+export type ProjectKind = z.infer<typeof ProjectKind>;
+
+// 项目级工作流环节序列（仅 collab 项目有意义；建任务时直接快照）。
+export const ProjectWorkflow = z.object({
+  stages: z.array(WorkflowStage).min(1).max(12),
+});
+export type ProjectWorkflow = z.infer<typeof ProjectWorkflow>;
+
 export const ProjectMeta = z.object({
   project_id: z.string(),
   name: z.string(),
@@ -54,6 +67,10 @@ export const ProjectMeta = z.object({
   updated_at: z.string(),
   // 个人项目（缺省 = personal，兼容旧数据）或公有域项目（文件存放在服务端工作空间，全员可读）。
   visibility: z.enum(["personal", "public"]).optional(),
+  // 项目类型（缺省 = standard，兼容旧数据）；collab/scheduled 仅允许个人项目。
+  kind: ProjectKind.optional(),
+  // 协作项目的环节序列（kind !== "collab" 时忽略）。
+  workflow: ProjectWorkflow.optional(),
   // 公有域项目必有：创建者（管理员）用户名；个人项目即创建者本人。
   owner: z.string().optional(),
   // 空间说明（可选）：这个工作空间是干什么的；随会话注入智能体上下文。

@@ -56,17 +56,32 @@ if (missing.length) {
   console.log('✅ 核心环境变量已填写');
 }
 
-// 4. 提示离线 ASR 模型
-console.log('\n🎤 4/4 离线 ASR 模型（可选，约 80 MB）');
-const modelDir = path.join(ROOT, 'packages', 'desktop', 'models', 'sherpa-onnx-paramformer');
-const modelFiles = ['model.int8.onnx', 'tokens.txt', 'am.mvn'];
-const hasModel = modelFiles.every(f => fs.existsSync(path.join(modelDir, f)));
-if (hasModel) {
-  console.log('✅ 模型文件已就位');
-} else {
-  console.log('⚠️ 未检测到模型文件，语音识别将不可用');
-  console.log('   下载地址: https://github.com/k2-fsa/sherpa-onnx/releases (搜 sherpa-onnx-paramformer-zh-small)');
-  console.log(`   解压到: ${modelDir}`);
+// 4. 提示离线语音模型（两个：识别 + 唤醒；.onnx 不进 git，需手动/应用内下载）
+console.log('\n🎤 4/4 离线语音模型（可选，识别约 80 MB + 唤醒约 5 MB）');
+const modelCheck = [
+  ['sherpa-paraformer', ['model.int8.onnx', 'tokens.txt', 'am.mvn'], '语音识别'],
+  ['sherpa-kws', ['encoder*.onnx', 'decoder*.onnx', 'joiner*.onnx', 'tokens.txt'], '语音唤醒'],
+];
+let modelMissing = false;
+for (const [dirName, files, label] of modelCheck) {
+  const dir = path.join(ROOT, 'packages', 'desktop', 'models', dirName);
+  // `*.onnx` = 前缀通配（kws 文件名带 epoch 后缀）；其余精确匹配
+  const ok = files.every(f =>
+    f.endsWith('*.onnx')
+      ? fs.existsSync(dir) && fs.readdirSync(dir).some(x => x.startsWith(f.slice(0, -6)) && x.endsWith('.onnx'))
+      : fs.existsSync(path.join(dir, f))
+  );
+  if (ok) {
+    console.log(`✅ ${label}模型已就位（${dirName}）`);
+  } else {
+    modelMissing = true;
+    console.log(`⚠️ 未检测到${label}模型（packages/desktop/models/${dirName}），${label}将不可用`);
+    console.log('   方式一：桌面端 设置 → 常规 → 语音模型 里一键下载（推荐）');
+    console.log('   方式二：https://github.com/k2-fsa/sherpa-onnx/releases 手动下载解压');
+  }
+}
+if (modelMissing) {
+  console.log('   注：安装包/应用内下载会把模型放到用户数据目录，同样生效');
 }
 
 console.log('\n🎉 安装完成！');

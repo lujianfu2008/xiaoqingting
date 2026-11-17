@@ -78,3 +78,17 @@ export function scheduleNameTaken(owner: string, name: string, excludeId?: strin
     (r) => r.owner === owner && r.name === name && r.schedule_id !== excludeId,
   );
 }
+
+/** 项目删除时级联删其定时任务（项目没了，任务失去宿主配置）。 */
+export function deleteProjectSchedules(projectId: string): void {
+  const all = loadAll();
+  const hit = Object.values(all).filter((r) => r.project_id === projectId);
+  if (hit.length === 0) return;
+  for (const rec of hit) delete all[rec.schedule_id];
+  saveAll(all);
+}
+
+/** 某项目名下的全部定时任务（级联删专属会话前先取引用）。 */
+export function listProjectSchedules(projectId: string): ScheduleRecord[] {
+  return Object.values(loadAll()).filter((r) => r.project_id === projectId);
+}

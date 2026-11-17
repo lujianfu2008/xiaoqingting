@@ -13,7 +13,7 @@ import type { SessionRegistry } from "./sessionRegistry.js";
 // flow_event 进会话历史并经 broadcastShared 到所有共享可见的在线用户。
 
 export class TaskCreateError extends Error {
-  constructor(public code: "bad_template" | "bad_target") {
+  constructor(public code: "bad_template" | "bad_target" | "bad_project") {
     super(code);
   }
 }
@@ -24,6 +24,7 @@ export interface CreateTaskInput {
   agent_id?: string;
   template_name?: string;
   assignees?: Record<string, string>;
+  project_id?: string;
 }
 
 export interface TaskFlowInput {
@@ -69,7 +70,28 @@ export class TaskManager {
    * 环节快照：显式指派优先（空串 = 清空预置岗位），否则用模板预置。
    */
   createTask(requester: string, input: CreateTaskInput): TaskRecord {
-    const tpl = resolveTemplate(requester, input.template_name);
+    // 协作项目承载：带 project_id 时校验项目存在、本人可用且为 collab。
+    let projectStages: WorkflowStage[] | null = null;
+    let projectName = "";
+    let projectId: string | null = null;
+    if (input.project_id) {
+      const proj = this.store.getProject(input.project_id);
+      if (
+        !proj ||
+        !this.registry.canUseProjectFor(requester, proj) ||
+        (proj.kind ?? "standard") !== "collab"
+      ) {
+        throw new TaskCreateError("bad_project");
+      }
+      projectStages = proj.workflow?.stages ?? null;
+      projectName = proj.name;
+      projectId = proj.project_id;
+    }
+    // 模板来源：协作项目自带环节链 → 项目级；否则按模板库解析（缺省 =
+    // 内置「标准流程」）。
+    const tpl = projectStages
+      ? { name: projectName, stages: projectStages }
+      : resolveTemplate(requester, input.template_name);
     if (!tpl) throw new TaskCreateError("bad_template");
     const stages: WorkflowStage[] = tpl.stages.map((s) => {
       const raw = input.assignees?.[s.key];
@@ -86,10 +108,10 @@ export class TaskManager {
       requester,
       input.agent_id ?? "assistant",
       input.title,
-      null,
+      projectId,
     );
     if (!session) {
-      // projectId=null 不走项目校验，这里只是类型收窄的防御分支。
+      // 协作项目 = requester 本人个人项目，canUseProject 恒过；这是类型收窄的防御分支。
       throw new Error("task session create failed");
     }
     const now = new Date().toISOString();
@@ -102,6 +124,7 @@ export class TaskManager {
       requester,
       template_name: tpl.name,
       stages,
+      ...(projectId ? { project_id: projectId } : {}),
       current_stage: stages[0].key,
       created_at: now,
       updated_at: now,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DiagResult } from "./diag.js";
 
 // ---------- Client -> Server (WebSocket) ----------
 
@@ -49,12 +50,19 @@ export const WsToolExecResult = z.object({
 
 export const WsPing = z.object({ type: z.literal("ping") });
 
+// 显示诊断回执：客户端对 diag_request 的应答（布局摘要 + 可选截图）。
+export const WsDiagResult = z.object({
+  type: z.literal("diag_result"),
+  result: DiagResult,
+});
+
 export const ClientMessage = z.discriminatedUnion("type", [
   WsUserMessage,
   WsInterrupt,
   WsRegenerate,
   WsPermissionResponse,
   WsToolExecResult,
+  WsDiagResult,
   WsPing,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;

@@ -34,7 +34,7 @@ function ViewerBody({ path, name, kind }: { path: string; name: string; kind: Vi
 
 export function ViewerPane(props: { chrome?: PaneChrome }): React.JSX.Element | null {
   const viewer = useStore((s) => s.viewer);
-  const closeViewerTab = useStore((s) => s.closeViewerTab);
+  const closeViewerAll = useStore((s) => s.closeViewerAll);
   const t = useT();
   const active = viewer.tabs.find((x) => x.id === viewer.activeId) ?? null;
 
@@ -75,15 +75,12 @@ export function ViewerPane(props: { chrome?: PaneChrome }): React.JSX.Element | 
         >
           {t("vw.popOut")}
         </button>
-        {/* 关闭整个阅读器（参照浏览器 pane 的 ✕）：当前 tab 有
-            内容则关它（pane 随之收起），空 pane 也直接收。 */}
+        {/* 总关闭（✕）：一键关掉全部 tab 并收起 pane——多 tab
+            时逐个点 × 太啰嗦。单个 tab 仍用 tab 上的 ×。 */}
         <button
           className="viewer-btn"
-          title={t("vw.closePane")}
-          onClick={() => {
-            if (active) closeViewerTab(active.id);
-            else useStore.getState().setViewerOpen(false);
-          }}
+          title={t("vw.closeAll")}
+          onClick={closeViewerAll}
         >
           ✕
         </button>

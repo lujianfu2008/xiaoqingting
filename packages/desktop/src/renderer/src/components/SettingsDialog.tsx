@@ -6,8 +6,6 @@ import { LlmPanel } from "./settings/LlmPanel";
 import { RelayPanel } from "./settings/RelayPanel";
 import { McpPanel } from "./settings/McpPanel";
 import { SkillsPanel } from "./settings/SkillsPanel";
-import { WorkflowsPanel } from "./settings/WorkflowsPanel";
-import { SchedulesPanel } from "./settings/SchedulesPanel";
 import { VoicePanel } from "./settings/VoicePanel";
 import { AsrPanel } from "./settings/AsrPanel";
 import { AccountPanel } from "./settings/AccountPanel";
@@ -15,6 +13,8 @@ import { AccountPanel } from "./settings/AccountPanel";
 // Settings panel, split into left-nav tabs so the (long) form never overflows
 // the window. All voice values persist in localStorage (blm.voiceSettings /
 // blm.autoRead); the LLM and MCP configs live on the server.
+// 工作流模板/定时任务已迁到对应类型的项目（侧边栏组内 ＋ 与 ⚙ 设置），
+// 不再占用设置页 tab。
 
 type Tab =
   | "general"
@@ -22,8 +22,6 @@ type Tab =
   | "relay"
   | "mcp"
   | "skills"
-  | "workflows"
-  | "schedules"
   | "voice"
   | "asr"
   | "account";
@@ -34,8 +32,6 @@ const TAB_KEYS = [
   { id: "relay", key: "set.tabRelay" },
   { id: "mcp", key: "set.tabMcp" },
   { id: "skills", key: "set.tabSkills" },
-  { id: "workflows", key: "set.tabWorkflows" },
-  { id: "schedules", key: "set.tabSchedules" },
   { id: "voice", key: "set.tabVoice" },
   { id: "asr", key: "set.tabAsr" },
   { id: "account", key: "set.tabAccount" },
@@ -88,12 +84,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             </div>
             <div className={`settings-pane ${tab === "skills" ? "" : "hidden"}`}>
               <SkillsPanel />
-            </div>
-            <div className={`settings-pane ${tab === "workflows" ? "" : "hidden"}`}>
-              <WorkflowsPanel />
-            </div>
-            <div className={`settings-pane ${tab === "schedules" ? "" : "hidden"}`}>
-              <SchedulesPanel onClose={onClose} />
             </div>
             <div className={`settings-pane ${tab === "voice" ? "" : "hidden"}`}>
               <VoicePanel />

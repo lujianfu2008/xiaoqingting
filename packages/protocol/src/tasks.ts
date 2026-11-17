@@ -39,6 +39,8 @@ export const TaskView = z.object({
   requester: z.string(), // 需求方
   template_name: z.string(), // 建任务所用模板名（仅展示用，运行不依赖）
   stages: z.array(WorkflowStage).min(1), // 环节快照（负责人即 assignee）
+  // 承载任务的项目（collab 项目）；null/缺省 = 默认空间（兼容旧数据）。
+  project_id: z.string().nullable().optional(),
   current_stage: z.string().nullable(), // 环节 key；null = 已完结
   created_at: z.string(),
   updated_at: z.string(),
@@ -47,13 +49,15 @@ export type TaskView = z.infer<typeof TaskView>;
 
 // REST: 由需求方创建任务线程（同时建一个绑定会话）。template_name 缺省 =
 // 内置「标准流程」；assignees = 显式指派（stage_key → 用户名，空串 = 清空预置
-// 岗位），未提到的环节用模板预置。
+// 岗位），未提到的环节用模板预置。project_id = 协作项目（缺省 = 默认空间，
+// 走模板库）。
 export const CreateTaskRequest = z.object({
   title: z.string().trim().min(1).max(100),
   description: z.string().max(8000).optional(),
   agent_id: z.string().optional(), // 缺省 "assistant"
   template_name: WorkflowName.optional(),
   assignees: z.record(z.string(), z.string()).optional(),
+  project_id: z.string().optional(),
 });
 export type CreateTaskRequest = z.infer<typeof CreateTaskRequest>;
 

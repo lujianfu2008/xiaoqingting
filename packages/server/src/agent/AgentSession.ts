@@ -21,6 +21,9 @@ export interface SessionEvents {
    *  from its session map — a dead session left in the map would silently
    *  swallow every later message pushed into its queue. */
   onDispose?: () => void;
+  /** 全部回合队列清空（真正空闲）时回调一次。远程诊断任务
+   *  据此结算报告（无须轮询历史）。 */
+  onIdle?: () => void;
 }
 
 // ---------- 子代理委派闸门 ----------
@@ -225,6 +228,8 @@ export class AgentSession {
             } else {
               this.disarmWatchdog();
               this.scheduleIdleClose();
+              // 真正空闲：无后续回合。诊断任务等外部观察者据此结算。
+              this.events.onIdle?.();
             }
           },
           onDelegateStart: (toolUseId, key) => this.gate.ensure(toolUseId, key),

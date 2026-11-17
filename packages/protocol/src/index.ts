@@ -11,4 +11,6 @@ export * from "./public.js";
 export * from "./tasks.js";
 export * from "./workflows.js";
 export * from "./schedules.js";
+export * from "./diag.js";
+export * from "./diagTask.js";
 export * from "./desktop.js";

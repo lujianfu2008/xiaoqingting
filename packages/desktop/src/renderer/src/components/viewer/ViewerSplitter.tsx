@@ -30,9 +30,16 @@ export function ViewerSplitter(): React.JSX.Element | null {
   return (
     <Splitter
       label={t("pane.dragW")}
-      onDrag={(x) =>
-        setW(Math.min(VTREE_MAX, Math.max(VTREE_MIN, Math.round(x))))
-      }
+      // Splitter 给的是窗口坐标 clientX；树宽是「指针到树左缘」
+      // 的距离——阅读器在窗口右侧时树左缘离窗口原点几百 px，
+      // 直接拿 clientX 当宽度会顶死上限（pane 放大挪到左侧后才
+      // 碰巧能用，数值也带着偏移）。换算成相对 .viewer-body
+      // 左缘的局部坐标，树在窗口哪里、pane 放大与否都跟手。
+      onDrag={(x, el) => {
+        const body = el.closest(".viewer-body");
+        const left = body ? body.getBoundingClientRect().left : 0;
+        setW(Math.min(VTREE_MAX, Math.max(VTREE_MIN, Math.round(x - left))));
+      }}
       onReset={() => setW(VTREE_DEFAULT)}
     />
   );

@@ -9,6 +9,9 @@ interface Conn {
   send: SendFn;
   /** Forces the underlying socket closed (used to kick disabled accounts). */
   close?: () => void;
+  /** "mobile" = 手机壳连接（无本机执行能力）：执行请求优先派给
+   * 同账号的桌面连接，仅当桌面全不在线时才落到手机。 */
+  kind?: "mobile";
 }
 
 export class ConnectionRegistry {
@@ -26,14 +29,14 @@ export class ConnectionRegistry {
     this.store = store;
   }
 
-  registerConnection(userId: string, send: SendFn, close?: () => void): () => void {
+  registerConnection(userId: string, send: SendFn, close?: () => void, kind?: "mobile"): () => void {
     let set = this.byUser.get(userId);
     if (!set) {
       set = new Set();
       this.byUser.set(userId, set);
     }
     const wasEmpty = set.size === 0;
-    const conn: Conn = { send, close };
+    const conn: Conn = { send, close, kind };
     set.add(conn);
     if (wasEmpty) {
       this.broadcastAll({ type: "presence", user_id: userId, online: true });
@@ -59,11 +62,23 @@ export class ConnectionRegistry {
     }
   }
 
-  /** Send to every connection of one user. */
-  broadcast(userId: string, msg: ServerMessage): void {
+  /**
+   * Send to every connection of one user. prefer="desktop" 时跳过
+   * mobile 连接（同账号手机+桌面都在线，本机执行不该落到手机）；
+   * 仅当该用户只有 mobile 连接时才照发。
+   */
+  broadcast(userId: string, msg: ServerMessage, prefer?: "desktop"): void {
     const set = this.byUser.get(userId);
     if (!set) return;
-    for (const conn of set) conn.send(msg);
+    for (const conn of set) {
+      if (prefer === "desktop" && conn.kind === "mobile" && set.size > 1) {
+        // 同账号还有其他（桌面）连接：mobile 不接执行请求。
+        // set.size===1 时（只有手机在线）照发，让手机得到
+        // 明确的拒绝回执而不是引擎侧超时。
+        continue;
+      }
+      conn.send(msg);
+    }
   }
 
   /**
@@ -91,7 +106,7 @@ export class ConnectionRegistry {
   broadcastShared(ownerId: string, sessionId: string, msg: ServerMessage): void {
     if (msg.type === "tool_exec_request") {
       const target = this.execTargetResolver?.(sessionId) ?? ownerId;
-      this.broadcast(target, msg);
+      this.broadcast(target, msg, "desktop");
       return;
     }
     this.broadcast(ownerId, msg);

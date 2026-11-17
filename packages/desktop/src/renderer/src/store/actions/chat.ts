@@ -23,7 +23,7 @@ function runLocally(
     })
     .then((result) => {
       sendExecResult(req.request_id, result);
-      // agent 读取/写入文件成功时自动弹出阅读器（设置可关；
+      // agent 读取文件成功时自动弹出阅读器（设置可关；
       // 只跟当前会话——后台会话读文件不打扰）。
       maybeAutoOpenViewer(req, result);
     })
@@ -35,12 +35,11 @@ function runLocally(
     );
 }
 
-/** 「agent 读文件时自动打开阅读器」的钩子（读/写/列目录成功后调用）。 */
-const AUTO_OPEN_ACTIONS = new Set(["read_file", "read_attachment", "write_file"]);
+/** 「agent 读文件时自动打开阅读器」的钩子（读成功后调用）。
+ *  只挂读取动作：write_file 一轮几十次，弹出纯属打扰。 */
 const AUTO_OPEN_PARAMS: Record<string, string> = {
   read_file: "path",
   read_attachment: "path",
-  write_file: "path",
 };
 
 function maybeAutoOpenViewer(
@@ -49,6 +48,8 @@ function maybeAutoOpenViewer(
 ): void {
   const s = useStore.getState();
   if (!s.viewerAutoOpen || !result.ok) return;
+  // 用户本轮手动关掉过阅读器：不再打扰，下一条用户消息重新武装。
+  if (s.viewerAutoSuppressed) return;
   // 只对当前正查看的会话生效：后台会话的工具调用不打扰。
   if (!s.currentSessionId || (req.session_id && req.session_id !== s.currentSessionId)) return;
   const key = AUTO_OPEN_PARAMS[req.action];
@@ -82,6 +83,8 @@ export function createChatActions(
         set({ error: t("err.offline") });
         return false;
       }
+      // 新回合开始：上一轮被用户关掉过阅读器的话，恢复自动弹出资格。
+      if (get().viewerAutoSuppressed) set({ viewerAutoSuppressed: false });
       // 协作线程跟随当前负责人（工作台跟随指派），普通共享会话仍是 owner：
       // 负责人不在线时快速失败，而不是让引擎卡在本机执行超时上（服务端同样执法）。
       const flowTask = get().tasks.find((tk) => tk.session_id === currentSessionId);
@@ -168,6 +171,8 @@ export function createChatActions(
       }
       stopAudio();
       set({ speaking: false });
+      // 重新生成同样是新回合：恢复自动弹出资格。
+      if (get().viewerAutoSuppressed) set({ viewerAutoSuppressed: false });
       // 服务端从落库历史取最后一条用户消息原文重发（不追加新块）。
       // busy 由 result/error 复位；断线重连路径里也会复位。
       sendJson({ type: "regenerate", session_id: currentSessionId });

@@ -48,6 +48,43 @@ export function registerDownloadRoutes(app: FastifyInstance): void {
   const dir = path.resolve(
     process.env.UPDATE_DIR ?? path.join(config.dataDir, "update"),
   );
+  // 语音模型按需下载目录：UPDATE_DIR/models/（与安装包同一
+  // 白名单根的子目录）。桌面端首用语音时拉
+  // /download/models/<name>.zip（sherpa-paraformer ~118MB 压缩前，
+  // sherpa-kws ~5MB）。
+  const modelsDir = path.join(dir, "models");
+
+  app.get("/download/models/:file", (req, reply) => {
+    const file = (req.params as { file: string }).file;
+    if (!/^[\w.-]+\.zip$/.test(file)) {
+      return reply.code(400).send({ error: "invalid_file" });
+    }
+    const full = path.join(modelsDir, file);
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const size = fs.statSync(full).size;
+    const range = parseRange(req.headers.range, size);
+    if (range === "unsat") {
+      return reply
+        .code(416)
+        .header("content-range", `bytes */${size}`)
+        .send();
+    }
+    if (range && range !== "ignore") {
+      return reply
+        .code(206)
+        .header("content-type", "application/zip")
+        .header("content-range", `bytes ${range.start}-${range.end}/${size}`)
+        .header("content-length", range.end - range.start + 1)
+        .send(fs.createReadStream(full, { start: range.start, end: range.end }));
+    }
+    return reply
+      .header("content-type", "application/zip")
+      .header("accept-ranges", "bytes")
+      .header("content-length", size)
+      .send(fs.createReadStream(full));
+  });
 
   app.get("/download/:file", (req, reply) => {
     const file = (req.params as { file: string }).file;

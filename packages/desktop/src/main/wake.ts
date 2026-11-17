@@ -2,10 +2,12 @@ import path from "node:path";
 import fs from "node:fs";
 import { app, type WebContents } from "electron";
 import { safeSend } from "./safeSend";
+import { modelDirOf } from "./modelFetch";
 // 语音唤醒：sherpa-onnx KeywordSpotter（zipformer wenetspeech 3.3M，int8）。
 // 纯 NAPI 原生模块，与 asr.ts 一样直接跑在主进程。唤醒词在运行时由
 // pinyin-pro 转成模型的 ppinyin token 序列生成 keywords.txt——设置里改词
 // 立即生效，无需训练；同音叫法（小蜻/小青/小情）读法相同，天然自动兼容。
+// 模型按需下载（modelFetch.ts），已装/手动放置的直接复用。
 const MODEL_DIR = "sherpa-kws";
 
 export type WakeSensitivity = "low" | "medium" | "high";
@@ -23,12 +25,7 @@ let stream: any = null;
 let configKey = "";
 
 function modelDir(): string {
-  const name = MODEL_DIR;
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "models", name);
-  }
-  // dev: out/main -> packages/desktop/models
-  return path.join(__dirname, "../../models", name);
+  return modelDirOf(MODEL_DIR);
 }
 
 /** 在模型目录里按前缀找 onnx（优先 int8，容忍文件名细节差异）。 */
@@ -37,7 +34,7 @@ function pickOnnx(dir: string, prefix: string): string {
   const hit =
     files.find((f) => f.startsWith(prefix) && f.includes("int8")) ??
     files.find((f) => f.startsWith(prefix));
-  if (!hit) throw new Error(`语音唤醒模型缺失（${dir} 中没有 ${prefix}*.onnx）`);
+  if (!hit) throw new Error(`语音唤醒模型不完整（${dir} 中没有 ${prefix}*.onnx）`);
   return path.join(dir, hit);
 }
 
@@ -55,16 +52,23 @@ function keywordLines(
     const w = word.trim();
     if (!w) continue;
     // 每个字 = 声母 + 带调韵母（零声母字只有韵母，如 爱 → ài）。
+    // 韵母带 ü 而 token 表没有时降级重试：模型 token 用不带 ü 的
+    // 拼写（j/q/x 后省写两点，如 学 → ué；表里 üè/üě 与 ué 混用），
+    // pinyin-pro 一律输出 ü 系，直接查会误判「未知字」把整词跳过。
     const toks: string[] = [];
     let ok = true;
     for (const ch of w) {
       const ini = pinyin(ch, { pattern: "initial", type: "string" });
       const fin = pinyin(ch, { pattern: "final", toneType: "symbol", type: "string" });
-      for (const tk of [ini, fin]) {
+      for (let tk of [ini, fin]) {
         if (!tk) continue;
         if (!tokens.has(tk)) {
-          ok = false;
-          break;
+          const alt = tk.replace(/ü/g, "u");
+          if (tokens.has(alt)) tk = alt;
+          else {
+            ok = false;
+            break;
+          }
         }
         toks.push(tk);
       }
@@ -91,7 +95,7 @@ export function configureWake(
     const dir = modelDir();
     const tokensPath = path.join(dir, "tokens.txt");
     if (!fs.existsSync(tokensPath)) {
-      return { error: `语音唤醒模型缺失（${dir}）` };
+      return { error: "语音唤醒模型未就绪（设置 → 常规 → 语音模型 里下载）" };
     }
     const tokens = new Set(
       fs

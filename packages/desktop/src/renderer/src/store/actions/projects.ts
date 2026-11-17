@@ -1,4 +1,4 @@
-import type { ProjectMeta } from "@blm/protocol";
+import type { ProjectMeta, WorkflowStage } from "@blm/protocol";
 import type { BlmState, GetState, SetState } from "../types";
 import { apiBase } from "../http";
 
@@ -9,7 +9,14 @@ import { apiBase } from "../http";
 export function createProjectActions(
   set: SetState,
   get: GetState,
-): Pick<BlmState, "loadProjects" | "createProject" | "deleteProject" | "updateProjectDescription"> {
+): Pick<
+  BlmState,
+  | "loadProjects"
+  | "createProject"
+  | "deleteProject"
+  | "updateProjectDescription"
+  | "updateProjectWorkflow"
+> {
   return {
     async loadProjects() {
       const { serverUrl, token } = get();
@@ -26,7 +33,7 @@ export function createProjectActions(
       }
     },
 
-    async createProject({ name, description, agentId, folder, visibility = "personal" }) {
+    async createProject({ name, description, agentId, folder, visibility = "personal", kind, workflow }) {
       const { serverUrl, token } = get();
       try {
         const res = await fetch(`${apiBase(serverUrl)}/api/projects`, {
@@ -35,6 +42,8 @@ export function createProjectActions(
           body: JSON.stringify({
             name,
             agent_id: agentId,
+            ...(kind && kind !== "standard" ? { kind } : {}),
+            ...(kind === "collab" && workflow ? { workflow } : {}),
             ...(description?.trim() ? { description: description.trim() } : {}),
             ...(visibility === "public" ? { visibility } : {}),
           }),
@@ -95,5 +104,31 @@ export function createProjectActions(
         return false;
       }
     },
+
+    /** 设置协作项目的环节链（仅本人；服务端落项目记录，只影响之后新建的任务）。 */
+    async updateProjectWorkflow(id, stages) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/projects/${id}/workflow`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ stages }),
+        });
+        if (!res.ok) return false;
+        set((s) => ({
+          projects: s.projects.map((p) =>
+            p.project_id === id
+              ? { ...p, workflow: { stages }, kind: "collab" as const }
+              : p,
+          ),
+        }));
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
 }
+
+// 类型仅作引用保留（WorkflowStage 随 actions 签名流动）。
+export type { WorkflowStage };

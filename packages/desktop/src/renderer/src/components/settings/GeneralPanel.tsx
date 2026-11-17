@@ -31,6 +31,8 @@ export function GeneralPanel(): React.JSX.Element {
   const setNotifyEnabled = useStore((s) => s.setNotifyEnabled);
   const viewerAutoOpen = useStore((s) => s.viewerAutoOpen);
   const setViewerAutoOpen = useStore((s) => s.setViewerAutoOpen);
+  const diagAllowScreenshot = useStore((s) => s.diagAllowScreenshot);
+  const setDiagAllowScreenshot = useStore((s) => s.setDiagAllowScreenshot);
   const [workDir, setWorkDir] = useState<string | null>(null);
   const [mode, setMode] = useState<ScopeMode>("workspace");
   const [folders, setFolders] = useState<string[]>([]);
@@ -301,6 +303,23 @@ export function GeneralPanel(): React.JSX.Element {
         </label>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
           {t("vw.autoOpenHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("dg.tab")}</label>
+        <label
+          style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={diagAllowScreenshot}
+            onChange={(e) => setDiagAllowScreenshot(e.target.checked)}
+          />
+          <span style={{ fontSize: 12 }}>{t("set.diagAllowScreenshot")}</span>
+        </label>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("dg.hint")}
         </div>
       </div>
 

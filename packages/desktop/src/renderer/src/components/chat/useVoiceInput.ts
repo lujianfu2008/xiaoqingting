@@ -133,12 +133,13 @@ export function useVoiceInput(
         return;
       }
       // 回合进行中也直接发送：服务端会把它并入当前回合（补充消息），与
-      // 输入框 Enter 的行为一致；只有没选中会话时才放回输入框。
+      // 输入框 Enter 的行为一致。没选中会话时不能谎称「已放入输入框」
+      // （appendDraft 无会话是静默 no-op，文本会蒸发）——如实提示；
+      // send 失败（断线等）同样把文本放回草稿，不蒸发。
       if (!currentSessionId) {
+        setVoiceMsg(t("chat.noSession"));
+      } else if (!send(text)) {
         appendDraft(text);
-        setVoiceMsg(t("vm.toDraft"));
-      } else {
-        send(text);
       }
     } catch (e) {
       setVoiceMsg(e instanceof Error ? e.message : t("vm.fail"));

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Block } from "./blocks.js";
-import { SessionMeta } from "./sessions.js";
+import { ProjectKind, ProjectWorkflow, SessionMeta } from "./sessions.js";
+import { DiagLayout } from "./diag.js";
 // ---------- REST ----------
 
 // 用户角色：admin = 公有域管理员（可创建公域项目、审批更新申请、管理用户）；
@@ -92,10 +93,18 @@ export const CreateProjectRequest = z.object({
   agent_id: z.string().optional(),
   // "public" = 公有域项目（文件存服务端工作空间），仅公有域管理员可创建。
   visibility: z.enum(["personal", "public"]).optional(),
+  // 项目类型（缺省 standard）；collab/scheduled 仅允许个人项目。
+  kind: ProjectKind.optional(),
+  // 协作项目的环节序列（仅 kind === "collab" 时收下）。
+  workflow: ProjectWorkflow.optional(),
   // 空间说明（可选）：随会话注入智能体上下文。
   description: z.string().trim().max(500).optional(),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
+
+// REST: update a collab project's stage chain (owner only).
+export const UpdateProjectWorkflowRequest = ProjectWorkflow;
+export type UpdateProjectWorkflowRequest = z.infer<typeof UpdateProjectWorkflowRequest>;
 
 // REST: update a project space's description (owner only; empty = clear).
 export const SetProjectDescriptionRequest = z.object({
@@ -187,6 +196,36 @@ export type DisabledUpdateRequest = z.infer<typeof DisabledUpdateRequest>;
 export const PublicExecToggleRequest = z.object({ enabled: z.boolean() });
 export type PublicExecToggleRequest = z.infer<typeof PublicExecToggleRequest>;
 
+// ---------- 显示诊断（仅管理员） ----------
+
+// 发起一次诊断采集：目标用户须在线（WS 推送）。scope=screenshot
+// 时客户端会附整窗截图（含聊天内容），管理页发起处有明示。
+export const DiagCollectRequest = z.object({
+  scope: z.enum(["layout", "screenshot"]),
+});
+export type DiagCollectRequest = z.infer<typeof DiagCollectRequest>;
+
+// 诊断结果清单（管理页「诊断」tab）：只回元数据，
+// 截图/摘要全文按 id 另取。
+export const DiagEntryMeta = z.object({
+  id: z.string(),
+  username: z.string(),
+  scope: z.enum(["layout", "screenshot"]),
+  at: z.string(),
+  has_screenshot: z.boolean(),
+});
+export type DiagEntryMeta = z.infer<typeof DiagEntryMeta>;
+
+export const DiagListResponse = z.object({ entries: z.array(DiagEntryMeta).max(50) });
+export type DiagListResponse = z.infer<typeof DiagListResponse>;
+
+export const DiagDetailResponse = z.object({
+  layout: DiagLayout.nullable(),
+  screenshot: z.object({ media_type: z.string(), data: z.string() }).nullable(),
+});
+export type DiagDetailResponse = z.infer<typeof DiagDetailResponse>;
+
+
 // ---------- 注册审核（管理员 + 其授权的审核员） ----------
 
 export const ReviewDecisionRequest = z.object({ approve: z.boolean() });
@@ -227,11 +266,15 @@ export const AUDIT_ACTIONS = [
   "skills.global_delete",
   // 客户端出口中继配置变更（管理员）。
   "relay.config_save",
+  // 远程诊断任务（管理员借用在线客户端的智能体排障）。
+  "diag.task_start",
   // 全局工作流模板变更（管理员）。
   "workflow.global_save",
   "workflow.global_delete",
   // 公有域服务端执行授权变更（管理员）。
   "public.exec_auth_change",
+  // 显示诊断采集（管理员发起，客户端自愿回传）。
+  "diag.collect",
 ] as const;
 
 export const AuditEntry = z.object({

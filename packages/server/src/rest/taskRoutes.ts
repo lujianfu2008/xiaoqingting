@@ -18,6 +18,7 @@ export function registerTaskRoutes(app: FastifyInstance, manager: AgentManager):
         ...(parsed.data.agent_id ? { agent_id: parsed.data.agent_id } : {}),
         ...(parsed.data.template_name ? { template_name: parsed.data.template_name } : {}),
         ...(parsed.data.assignees ? { assignees: parsed.data.assignees } : {}),
+        ...(parsed.data.project_id ? { project_id: parsed.data.project_id } : {}),
       });
       return reply.code(201).send(rec);
     } catch (e) {

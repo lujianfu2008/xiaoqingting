@@ -27,6 +27,8 @@ interface AccessScopeState {
 contextBridge.exposeInMainWorld("blm", {
   platform: process.platform,
   versions: {
+    // dev 环境用 npm_package_version；打包后经 blm:app:version
+    // 取真版本（异步覆盖，诊断采集时多半已就位）。
     app: process.env.npm_package_version ?? "0.1.0",
   },
   executeLocalAction: (request: {
@@ -74,6 +76,26 @@ contextBridge.exposeInMainWorld("blm", {
     ipcRenderer.invoke("blm:updater:bind", { server_url: serverUrl }),
   checkUpdate: (): Promise<"up_to_date" | "available" | "error"> =>
     ipcRenderer.invoke("blm:updater:check"),
+  // 浮条 ✕：取消下载并隐藏（服务端有新版本时会随新检查回来）。
+  cancelUpdate: (): void => ipcRenderer.send("blm:updater:cancel"),
+  // 语音模型按需下载：绑定服务器源 / 查状态 / 触发下载；
+  // 下载进度经 blm:models:state 推送（onModelState）。
+  bindModelSource: (serverUrl: string): Promise<void> =>
+    ipcRenderer.invoke("blm:models:bind", { server_url: serverUrl }),
+  modelsState: (): Promise<import("@blm/protocol").ModelState[]> =>
+    ipcRenderer.invoke("blm:models:state"),
+  downloadModel: (
+    name: "sherpa-paraformer" | "sherpa-kws",
+  ): Promise<import("@blm/protocol").ModelState> =>
+    ipcRenderer.invoke("blm:models:download", name),
+  onModelState: (
+    cb: (s: import("@blm/protocol").ModelState) => void,
+  ): (() => void) => {
+    const listener = (_e: unknown, s: unknown): void =>
+      cb(s as Parameters<typeof cb>[0]);
+    ipcRenderer.on("blm:models:state", listener);
+    return () => ipcRenderer.removeListener("blm:models:state", listener);
+  },
   // 自动更新下载进度（main 节流后推送；phase=idle 表示没有下载在进行）。
   onUpdateProgress: (
     cb: (s: {
@@ -133,6 +155,27 @@ contextBridge.exposeInMainWorld("blm", {
     ipcRenderer.invoke("blm:app:getPrefs"),
   setCloseAction: (v: "quit" | "tray"): Promise<"quit" | "tray"> =>
     ipcRenderer.invoke("blm:app:setCloseAction", v),
+  // 显示诊断：渲染层采集布局摘要时向主进程要的两样原料。
+  // 截图返回 { image, posed }：posed=false = 瞬间 view 被
+  // 遮罩藏着（采集必经管理对话框），画面里 stage 是白底。
+  diagScreenshot: (): Promise<{
+    image: Electron.NativeImage;
+    posed: boolean;
+  } | null> => ipcRenderer.invoke("blm:diag:screenshot"),
+  diagBrowserBounds: (): Promise<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }> => ipcRenderer.invoke("blm:diag:browserBounds"),
+  diagScreenInfo: (): Promise<{
+    bounds: Electron.Rectangle;
+    workArea: Electron.Rectangle;
+    scaleFactor: number;
+    contentSize: { width: number; height: number } | null;
+  } | null> => ipcRenderer.invoke("blm:diag:screenInfo"),
+  diagAppVersion: (): Promise<string> =>
+    ipcRenderer.invoke("blm:app:version"),
   accessScope: {
     get: (projectId?: string): Promise<AccessScopeState> =>
       ipcRenderer.invoke("blm:access:get", { project_id: projectId }),
@@ -207,8 +250,22 @@ contextBridge.exposeInMainWorld("blm", {
     // Which session tab is focused: main shows only that session's page.
     setActiveSession: (sessionId: string | null): Promise<void> =>
       ipcRenderer.invoke("blm:browser:activeSession", { session_id: sessionId }),
-    setBounds: (rect: { x: number; y: number; width: number; height: number }): Promise<void> =>
+    setBounds: (rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      covered?: boolean;
+    }): Promise<void> =>
       ipcRenderer.invoke("blm:browser:setBounds", rect),
+    // 高分屏 DPI 分叉检测：渲染层视口自报（0.5.94+ 才有，
+    // 旧客户端不调——主进程侧可选）。
+    setViewport: (vp: {
+      width: number;
+      height: number;
+      dpr: number;
+    }): Promise<void> =>
+      ipcRenderer.invoke("blm:browser:setViewport", vp),
     setMode: (mode: "embedded" | "popup"): Promise<BrowserState> =>
       ipcRenderer.invoke("blm:browser:setMode", mode),
     open: (url: string): Promise<{ ok: boolean; error?: string }> =>

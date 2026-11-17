@@ -23,12 +23,16 @@ import {
 
 export type { BrowserMode, BrowserState } from "./surfaces";
 export {
+  captureComposite,
   forgetSession,
+  noteViewport,
   registerHost,
   relayout,
+  rendererViewport,
   setActiveSession,
   setBounds,
   state,
+  viewBounds,
 } from "./surfaces";
 
 export async function open(
