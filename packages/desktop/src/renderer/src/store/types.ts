@@ -353,6 +353,10 @@ export interface BlmState {
   closeViewerTab(id: string): void;
   /** 总关闭：一键关掉全部 tab 并收起 pane。 */
   closeViewerAll(): void;
+  /** 关掉指定 tab 左侧的全部（tab 栏菜单）。 */
+  closeViewerLeft(id: string): void;
+  /** 关掉指定 tab 右侧的全部（tab 栏菜单）。 */
+  closeViewerRight(id: string): void;
   activateViewerTab(id: string): void;
   /** 展开/收起 pane（无 tab 时不可凭空展开）。 */
   setViewerOpen(on: boolean): void;

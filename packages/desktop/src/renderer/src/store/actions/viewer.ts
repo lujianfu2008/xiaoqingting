@@ -14,6 +14,8 @@ export function createViewerActions(
   | "openViewerFiles"
   | "closeViewerTab"
   | "closeViewerAll"
+  | "closeViewerLeft"
+  | "closeViewerRight"
   | "activateViewerTab"
   | "setViewerOpen"
   | "setViewerAutoOpen"
@@ -83,6 +85,30 @@ export function createViewerActions(
         viewer: { open: false, tabs: [], activeId: null, treeRoot: cur.treeRoot, treeCollapsed: cur.treeCollapsed },
         viewerAutoSuppressed: true,
       });
+    },
+
+    /** 关掉指定 tab 左侧的全部（tab 栏右键菜单）。 */
+    closeViewerLeft(id) {
+      const cur = get().viewer;
+      const idx = cur.tabs.findIndex((x) => x.id === id);
+      if (idx <= 0) return; // 最左（或没这个 tab）没有左侧
+      const tabs = cur.tabs.filter((x, i) => i >= idx);
+      const activeId = tabs.some((x) => x.id === cur.activeId)
+        ? cur.activeId
+        : tabs[0].id;
+      set({ viewer: { ...cur, tabs, activeId } });
+    },
+
+    /** 关掉指定 tab 右侧的全部（tab 栏右键菜单）。 */
+    closeViewerRight(id) {
+      const cur = get().viewer;
+      const idx = cur.tabs.findIndex((x) => x.id === id);
+      if (idx < 0 || idx === cur.tabs.length - 1) return; // 最右没有右侧
+      const tabs = cur.tabs.filter((x, i) => i <= idx);
+      const activeId = tabs.some((x) => x.id === cur.activeId)
+        ? cur.activeId
+        : tabs[tabs.length - 1].id;
+      set({ viewer: { ...cur, tabs, activeId } });
     },
 
     activateViewerTab(id) {

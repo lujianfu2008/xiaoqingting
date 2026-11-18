@@ -508,14 +508,18 @@ function ProjectGroup({
           {expanded ? "▾" : "▸"}
         </button>
         <span
-          style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", borderRadius: 4 }}
+          className="project-name-toggle"
           title={
-            isPublic
+            (isPublic
               ? t("proj.publicTip", { owner: project.owner ?? "" })
               : folder
                 ? t("proj.spaceTip", { folder })
-                : t("proj.unboundTip")
+                : t("proj.unboundTip")) +
+            " · " +
+            t("proj.expandTip")
           }
+          onClick={onToggle}
         >
           {kindIcon} {project.name}
           {!isPublic && folder === null && (

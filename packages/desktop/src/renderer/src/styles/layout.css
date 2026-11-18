@@ -341,6 +341,11 @@ body.resizing {
   font-size: 10px;
 }
 
+/* 点项目名本身也能展开/收起：hover 给一点底色反馈。 */
+.project-group-head .project-name-toggle:hover {
+  background: var(--panel-2);
+}
+
 .admin-badge {
   margin-left: 6px;
   font-size: 10px;
@@ -771,6 +776,55 @@ body.resizing {
 .viewer-tab .tab-x:hover {
   color: var(--danger);
   background: var(--panel-2);
+}
+
+/* 批量关闭菜单入口（▾）：默认淡化，hover/激活 tab 时显形。 */
+.viewer-tab .tab-menu-btn {
+  color: transparent;
+  width: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.viewer-tab:hover .tab-menu-btn,
+.viewer-tab.active .tab-menu-btn {
+  color: var(--muted);
+  width: auto;
+  padding: 0 3px;
+}
+.viewer-tab .tab-menu-btn:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+/* tab 批量关闭菜单（右键/▾）：同会话移动菜单的内联样式风格。 */
+.tab-close-menu {
+  min-width: 130px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  z-index: 1000;
+}
+.tab-close-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.tab-close-menu-item:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.tab-close-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* 内容区各 viewer 的公共样式 */

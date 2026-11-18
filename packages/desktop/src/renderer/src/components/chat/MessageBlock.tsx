@@ -98,17 +98,59 @@ return (
 );
 }
 
-// 委派调用的任务摘要：description 优先，没有用 prompt 截断。
-function delegateSummary(block: Extract<Block, { kind: "tool_call" }>): string {
-if (block.tool_name !== "delegate_task") return "";
+// 工具调用的内联摘要：把输入里最有信息量的参数接到工具名后面——
+// run_command 的命令、文件工具的路径、浏览器工具的网址、
+// delegate_task 的任务摘要等；识别不出的输入退化为紧凑 JSON
+// （外部 MCP 工具形状各异）。这只是时间线预览：换行折成 ⏎、
+// 超长截断——完整输入在审批弹窗与会话导出里。
+// 摘要可点击：网址在内置浏览器打开，文件路径进内置阅读器。
+const SUMMARY_MAX = 120;
+
+// 摘要的种类：url → 内置浏览器；path → 内置阅读器；text 纯展示。
+type SummaryKind = "url" | "path" | "text";
+
+interface ToolSummary {
+  text: string;
+  kind: SummaryKind;
+}
+
+const PATH_TOOLS = new Set(["read_file", "read_attachment", "write_file", "list_dir"]);
+const URL_TOOLS = new Set(["browser_open", "browser_navigate", "fetch_url"]);
+
+function toolSummary(block: Extract<Block, { kind: "tool_call" }>): ToolSummary | null {
 const inp = typeof block.input === "object" && block.input !== null
-? (block.input as { description?: unknown; prompt?: unknown })
+? (block.input as Record<string, unknown>)
 : {};
-const s = [inp.description, inp.prompt].find(
-(v): v is string => typeof v === "string" && v.trim().length > 0,
-);
-if (!s) return "";
-return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+if (Object.keys(inp).length === 0) return null;
+const first = (...vals: unknown[]): string | null => {
+for (const v of vals) {
+if (typeof v === "string" && v.trim().length > 0) return v;
+}
+return null;
+};
+// 依次找最有信息量的参数；write_file 只取路径不取 content（正文
+// 可能极长，且配对的 tool_result 已有回执）。
+const kind: SummaryKind = URL_TOOLS.has(block.tool_name)
+? "url"
+: PATH_TOOLS.has(block.tool_name)
+? "path"
+: "text";
+const s =
+block.tool_name === "delegate_task"
+? first(inp.description, inp.prompt)
+: first(inp.command, inp.file_path, inp.path, inp.url, inp.query, inp.pattern);
+if (!s) {
+const j = JSON.stringify(inp);
+return { text: j.length > SUMMARY_MAX ? `${j.slice(0, SUMMARY_MAX)}…` : j, kind: "text" };
+}
+// 网址长度充裕（超长路径除外），单行显示即可。
+if (kind === "url") return { text: s, kind };
+// 预览单行化：换行以 ⏎ 展示（保留多行命令的分段语义）。
+const flat = s.replace(/\s*\n\s*/g, " ⏎ ");
+return {
+text: flat.length > SUMMARY_MAX ? `${flat.slice(0, SUMMARY_MAX)}…` : flat,
+kind,
+};
 }
 
 // 工具结果（工具输出纯文本）：路径 linkify 后同样可点进阅读器
@@ -204,12 +246,17 @@ return (
 </div>
 );
 case "tool_call": {
-const summary = delegateSummary(block);
+const summary = toolSummary(block);
 return (
 <div className="tool-block">
 <AgentBadge block={block} />
 🔧 {block.tool_name}
-{summary ? <span style={{ opacity: 0.75 }}> — {summary}</span> : null}
+{summary ? (
+<>
+{" — "}
+<ToolSummarySpan summary={summary} />
+</>
+) : null}
 <ToolPathChip block={block} />
 </div>
 );
@@ -287,6 +334,50 @@ function ToolPathChip({ block }: { block: Extract<Block, { kind: "tool_call" }> 
       onClick={() => openViewerFiles([p])}
     >
       📄 {p.split(/[\\/]/).pop()}
+    </span>
+  );
+}
+
+// 工具摘要行：url 网址点击在内置浏览器打开（当前会话的页面，
+// 与 agent 的 browser_open 同一通道）；path 文件路径 stat 校验
+// 后进内置阅读器；text 纯展示。与摘要同一入口渲染 chip 样式，
+// 完整文本放 title（预览可能截断）。内置浏览器/阅读器在
+// 不支持的壳（Android）里各自返回失败错误，不崩溃。
+function ToolSummarySpan({ summary }: { summary: ToolSummary }): React.JSX.Element {
+  const t = useT();
+  const openViewerFiles = useStore((s) => s.openViewerFiles);
+  const { text, kind } = summary;
+  const title =
+    kind === "url"
+      ? `${text}（点击在内置浏览器中打开）`
+      : kind === "path"
+        ? `${text}（点击在阅读器中查看）`
+        : text;
+  const onClick =
+    kind === "text"
+      ? undefined
+      : kind === "url"
+        ? () => {
+            void window.blm.browser.open(text).then((r) => {
+              if (!r.ok) {
+                useStore.setState({ error: r.error ?? t("chat.openFail") });
+              }
+            });
+          }
+        : () => {
+            void window.blm.viewer.stat(text).then((r) => {
+              if (r.kind === "file" || r.kind === "dir") openViewerFiles([text]);
+              else useStore.setState({ error: t("vw.fileMissing") });
+            });
+          };
+  return (
+    <span
+      className={kind === "text" ? undefined : "attach-chip clickable"}
+      style={kind === "text" ? { opacity: 0.75 } : undefined}
+      title={title}
+      onClick={onClick}
+    >
+      {text}
     </span>
   );
 }
