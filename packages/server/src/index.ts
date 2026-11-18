@@ -2,6 +2,7 @@ import "./engineSilence.js";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
+import compress from "@fastify/compress";
 import { config, ensureDataDirs } from "./config.js";
 import { AgentManager } from "./agent/AgentManager.js";
 import { Store } from "./store.js";
@@ -28,8 +29,21 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: { level: "info" } });
   await app.register(cors, { origin: true });
+  // REST 响应压缩：按请求 accept-encoding 协商 gzip/br，<1KB 不压。
+  await app.register(compress, { threshold: 1024 });
   // relay 通道的帧携带长上下文 LLM 请求体，上限放宽（普通聊天通道不受影响）。
-  await app.register(websocket, { options: { maxPayload: 64 * 1024 * 1024 } });
+  // WS permessage-deflate：协商机制（客户端 offer 才启用），base64 附件、
+  // 长上下文体等大帧收益明显；小帧走 threshold 跳过，零开销。
+  await app.register(websocket, {
+    options: {
+      maxPayload: 64 * 1024 * 1024,
+      perMessageDeflate: {
+        zlibDeflateOptions: { level: 6 },
+        threshold: 2048, // 2KB 以下不压
+        concurrencyLimit: 10,
+      },
+    },
+  });
 
   registerRoutes(app, manager, store, scheduler);
 
