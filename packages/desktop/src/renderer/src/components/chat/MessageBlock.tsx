@@ -247,7 +247,11 @@ return (
 );
 case "tool_call": {
 const summary = toolSummary(block);
+// 复制的是完整输入（run_command 的命令全文、write_file 的
+// 路径+正文等）——时间线上的摘要只是预览，复制要拿全量。
+const inputJson = JSON.stringify(block.input ?? {}, null, 2);
 return (
+<div className="msg-wrap">
 <div className="tool-block">
 <AgentBadge block={block} />
 🔧 {block.tool_name}
@@ -258,6 +262,10 @@ return (
 </>
 ) : null}
 <ToolPathChip block={block} />
+</div>
+<div className="msg-actions">
+<CopyButton text={inputJson} />
+</div>
 </div>
 );
 }
