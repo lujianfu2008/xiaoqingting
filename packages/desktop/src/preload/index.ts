@@ -54,6 +54,13 @@ contextBridge.exposeInMainWorld("blm", {
     ipcRenderer.on("blm:menu:open-settings", listener);
     return () => ipcRenderer.removeListener("blm:menu:open-settings", listener);
   },
+  // 阅读器内容缩放（Ctrl+= / Ctrl+- / Ctrl+0；main 菜单与
+  // before-input-event 转发）："in" | "out" | "reset"。
+  onViewerZoom: (cb: (cmd: "in" | "out" | "reset") => void): (() => void) => {
+    const listener = (_e: unknown, cmd: "in" | "out" | "reset"): void => cb(cmd);
+    ipcRenderer.on("blm:viewer:zoom", listener);
+    return () => ipcRenderer.removeListener("blm:viewer:zoom", listener);
+  },
   // Fired when 应用菜单 → 文件 → 打开文件… is clicked.
   onOpenFiles: (cb: () => void): (() => void) => {
     const listener = (): void => cb();

@@ -24,6 +24,8 @@ import { relayRegistry } from "./registry.js";
 const BODY_MAX = 32 * 1024 * 1024; // 长上下文请求体上限
 const REQ_CONCURRENCY_MAX = 8; // 每个代发桌面同时在桥上的请求数
 const REQ_IDLE_TIMEOUT_MS = 300_000; // 单请求无数据超时（流式响应每片续期）
+const PROXY_FIRST_BYTE_TIMEOUT_MS = 60_000; // 首字节看门狗：帧送出后 60s 无回帧即换路
+const DIRECT_TIMEOUT_MS = 600_000; // 直连兜底超时
 
 // hop-by-hop 与会破坏文本性/寻址的头不转发（accept-encoding 剔除防压缩响应）。
 const STRIP_HEADERS = new Set([
@@ -45,6 +47,8 @@ interface PendingRequest {
   host: string;
   headersSent: boolean;
   idleTimer: NodeJS.Timeout;
+  /** 首字节看门狗触发后的兜底材料（换直连用）；回帧到达即清除。 */
+  takeover?: () => void;
 }
 
 const pending = new Map<string, PendingRequest>();
@@ -232,9 +236,27 @@ async function handleIngressRequest(req: IncomingMessage, res: ServerResponse): 
     idleTimer: setTimeout(() => finish(reqId, "中继请求超时（无数据）"), REQ_IDLE_TIMEOUT_MS),
   };
   pending.set(reqId, entry);
+
+  // 首字节看门狗：帧已送进 WS（在线），但桌面 60s 不回帧——桌面进程挂了、
+  // 或它的网络出口到不了目标（双出口家宽一条通服务器一条不通网关）。
+  // 别让引擎黑等到 API_TIMEOUT_MS：取消桌面侧请求，服务端直连接管同一响应流。
+  entry.takeover = () => {
+    const cur = pending.get(reqId);
+    if (cur !== entry || entry.headersSent) return;
+    pending.delete(reqId);
+    clearTimeout(entry.idleTimer);
+    console.warn(
+      `[relay] ${owner} ← 代发 ${proxy} 60s 无回帧 (${host})——改服务端直连接管`,
+    );
+    relayRegistry.sendTo(proxy, { type: "llm_cancel", req_id: reqId });
+    void passThroughDirectBody(req, res, owner, enginePath, body);
+  };
+  entry.idleTimer = setTimeout(() => entry.takeover?.(), PROXY_FIRST_BYTE_TIMEOUT_MS);
+
   relayRegistry.recordRequest(owner, host);
   console.info(
-    `[relay] ${owner}${sessionId ? ` (session ${sessionId})` : ""} → 代发 ${proxy} ${host}${enginePath.split("?")[0]}`,
+    `[relay] ${owner}${sessionId ? ` (session ${sessionId})` : ""} → 代发 ${proxy} ${host}${enginePath.split("?")[0]}` +
+      ` [帧 ${(body.length / 1024).toFixed(1)}KB 头 ${Object.keys(headers).length} 个: ${Object.keys(headers).join(",")}]`,
   );
 
   // 引擎侧主动断开（用户点停止/会话中断）：abort 桌面端的对端请求。
@@ -279,6 +301,29 @@ async function passThroughDirect(
     if (STRIP_HEADERS.has(k)) continue;
     headers[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
   }
+  await passThroughDirectBody(req, res, owner, enginePath, body, target, headers);
+}
+
+/**
+ * 直连兜底的执行半段：目标/头已备好（代发接管时直接给，不再读 req——
+ * 引擎请求体早已读完），fetch 上游并把响应流写回引擎。
+ */
+async function passThroughDirectBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+  owner: string,
+  enginePath: string,
+  body: string,
+  target = resolveBaseUrl(owner) + enginePath,
+  headers: Record<string, string> = (() => {
+    const h: Record<string, string> = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (STRIP_HEADERS.has(k)) continue;
+      h[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
+    }
+    return h;
+  })(),
+): Promise<void> {
   const abort = new AbortController();
   res.on("close", () => abort.abort());
   let host = target;
@@ -295,7 +340,7 @@ async function passThroughDirect(
       method: req.method ?? "POST",
       headers,
       body: body.length > 0 ? body : undefined,
-      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(600_000)]),
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(DIRECT_TIMEOUT_MS)]),
     });
   } catch (err) {
     relayRegistry.recordFailure(owner, host, (err as Error).message);
@@ -388,6 +433,7 @@ export function handleRelayClientMessage(username: string, msg: RelayClientMessa
     case "llm_response_head": {
       if (entry.headersSent) return;
       entry.headersSent = true;
+      entry.takeover = undefined; // 已有回帧：首字节看门狗退场
       try {
         entry.res.writeHead(msg.status, {
           "content-type": msg.content_type ?? "application/json",
@@ -399,16 +445,17 @@ export function handleRelayClientMessage(username: string, msg: RelayClientMessa
       return;
     }
     case "llm_response_chunk": {
+      if (!entry.headersSent) {
+        // 容错：桌面端漏发 head 时按 200 处理
+        entry.headersSent = true;
+        entry.takeover = undefined; // 已有回帧：首字节看门狗退场
+        entry.res.writeHead(200, { "content-type": "text/event-stream" });
+      }
       clearTimeout(entry.idleTimer);
       entry.idleTimer = setTimeout(
         () => finish(msg.req_id, "中继请求超时（流中断）"),
         REQ_IDLE_TIMEOUT_MS,
       );
-      if (!entry.headersSent) {
-        // 容错：桌面端漏发 head 时按 200 处理
-        entry.headersSent = true;
-        entry.res.writeHead(200, { "content-type": "text/event-stream" });
-      }
       entry.res.write(msg.data);
       return;
     }

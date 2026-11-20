@@ -21,6 +21,7 @@ export function ViewerTabBar(): React.JSX.Element | null {
   const closeViewerAll = useStore((s) => s.closeViewerAll);
   const closeViewerLeft = useStore((s) => s.closeViewerLeft);
   const closeViewerRight = useStore((s) => s.closeViewerRight);
+  const closeViewerOthers = useStore((s) => s.closeViewerOthers);
   const t = useT();
   const [menu, setMenu] = useState<MenuState | null>(null);
 
@@ -40,6 +41,7 @@ export function ViewerTabBar(): React.JSX.Element | null {
       { label: t("vw.closeThis"), disabled: false, run: () => closeViewerTab(id) },
       { label: t("vw.closeRight"), disabled: idx < 0 || idx === tabs.length - 1, run: () => closeViewerRight(id) },
       { label: t("vw.closeLeft"), disabled: idx <= 0, run: () => closeViewerLeft(id) },
+      { label: t("vw.closeOthers"), disabled: idx < 0 || tabs.length <= 1, run: () => closeViewerOthers(id) },
       { label: t("vw.closeAllTabs"), disabled: false, run: () => closeViewerAll() },
     ];
   };

@@ -4,7 +4,8 @@ import { useT } from "../../i18n";
 import type { McpRegistryCard, McpServerDef, McpServerInfo } from "@blm/protocol";
 
 // MCP 设置面板：服务器列表（全局 + 我的）、表单增改、从市场粘贴导入。
-// 普通用户只能添加远程 http/sse 服务器；管理员另有全局区块（含 stdio）。
+// 「我的」服务器实际连接由本桌面发起（http/sse 直接转发、stdio 本机
+// spawn），因此本机/内网地址也合法；管理员另有全局区块（服务端直连）。
 // 配置保存在服务端，写入后空闲会话被重建，下一条消息生效。
 
 type Scope = "user" | "global";
@@ -15,11 +16,10 @@ const TYPE_KEYS: Record<string, "mcp.typeStdio" | "mcp.typeHttp" | "mcp.typeSse"
   sse: "mcp.typeSse",
 };
 
-const SKIP_REASON_KEYS: Record<string, "mcp.skipInvalidName" | "mcp.skipReserved" | "mcp.skipInvalidDef" | "mcp.skipStdio" | "mcp.errInvalidUrl" | "mcp.errPrivateUrl" | "mcp.errUnresolvable"> = {
+const SKIP_REASON_KEYS: Record<string, "mcp.skipInvalidName" | "mcp.skipReserved" | "mcp.skipInvalidDef" | "mcp.errInvalidUrl" | "mcp.errPrivateUrl" | "mcp.errUnresolvable"> = {
   invalid_name: "mcp.skipInvalidName",
   reserved_name: "mcp.skipReserved",
   invalid_def: "mcp.skipInvalidDef",
-  stdio_forbidden: "mcp.skipStdio",
   invalid_url: "mcp.errInvalidUrl",
   private_url: "mcp.errPrivateUrl",
   unresolvable_host: "mcp.errUnresolvable",
@@ -218,7 +218,7 @@ function ServerForm({
         <select value={type} onChange={(e) => setType(e.target.value as McpServerDef["type"])}>
           <option value="http">{t("mcp.typeHttp")}</option>
           <option value="sse">{t("mcp.typeSse")}</option>
-          {scope === "global" && <option value="stdio">{t("mcp.typeStdio")}</option>}
+          <option value="stdio">{t("mcp.typeStdio")}</option>
         </select>
       </div>
       {type === "stdio" ? (
@@ -248,7 +248,10 @@ function ServerForm({
               placeholder="KEY=VALUE"
             />
           </div>
-          <div style={{ fontSize: 11, color: "var(--danger)" }}>{t("mcp.stdioWarn")}</div>
+          {/* stdio 语义随作用域不同：全局 = 服务器上 spawn；我的 = 本机 spawn */}
+          <div style={{ fontSize: 11, color: "var(--danger)" }}>
+            {scope === "global" ? t("mcp.stdioWarn") : t("mcp.stdioMine")}
+          </div>
         </>
       ) : (
         <>
@@ -320,9 +323,9 @@ function ServerSection({ scope, title }: { scope: Scope; title: string }): React
   };
 
   const canEdit = (info: McpServerInfo): boolean => scope === "global" || info.source === "user";
-  // 「覆盖」：以我的同名配置覆盖全局条目（stdio 全局条目用户无法复制，不给入口）。
+  // 「覆盖」：以我的同名配置覆盖全局条目（我的支持全部传输类型，含 stdio）。
   const canCover = (info: McpServerInfo): boolean =>
-    scope === "user" && info.source === "global" && info.type !== "stdio";
+    scope === "user" && info.source === "global";
 
   return (
     <div style={{ marginBottom: 16 }}>

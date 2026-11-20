@@ -23,8 +23,9 @@ function getPdfjs(): Promise<typeof import("pdfjs-dist")> {
 }
 
 const PAGE_INC = 5;
+const BASE_SCALE = 1.5;
 
-export default function PdfViewer({ path }: ViewerProps): React.JSX.Element {
+export default function PdfViewer({ path, zoom }: ViewerProps): React.JSX.Element {
   const t = useT();
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(0);
@@ -65,6 +66,8 @@ export default function PdfViewer({ path }: ViewerProps): React.JSX.Element {
   }, [path]);
 
   // 渲染 page 1..pages 到 canvas（重渲染时复用已有 canvas）。
+  // 缩放（Ctrl+滚轮 / Ctrl+=·-·0）按新倍率重渲——位图放大
+  // 会糊，重渲保持文字锐利。canvas 换尺寸即换，逐页渲染。
   useEffect(() => {
     const host = hostRef.current;
     const doc = docRef.current;
@@ -74,8 +77,7 @@ export default function PdfViewer({ path }: ViewerProps): React.JSX.Element {
       for (let i = 1; i <= pages; i++) {
         if (!alive) return;
         const page = await doc.getPage(i);
-        const scale = 1.5;
-        const vp = page.getViewport({ scale });
+        const vp = page.getViewport({ scale: BASE_SCALE * (zoom ?? 1) });
         let canvas = host.querySelector<HTMLCanvasElement>(`canvas[data-page="${i}"]`);
         if (!canvas) {
           canvas = document.createElement("canvas");
@@ -84,7 +86,8 @@ export default function PdfViewer({ path }: ViewerProps): React.JSX.Element {
         }
         canvas.width = Math.floor(vp.width);
         canvas.height = Math.floor(vp.height);
-        canvas.style.maxWidth = "100%";
+        canvas.style.maxWidth = "none";
+        canvas.style.width = `${vp.width}px`;
         await page.render({
           canvasContext: canvas.getContext("2d")!,
           viewport: vp,
@@ -94,7 +97,7 @@ export default function PdfViewer({ path }: ViewerProps): React.JSX.Element {
     return () => {
       alive = false;
     };
-  }, [pages, total]);
+  }, [pages, total, zoom]);
 
   if (failed) {
     return (

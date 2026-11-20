@@ -20,8 +20,6 @@ function errorText(code: string): string {
       return t("mcp.errUnresolvable");
     case "invalid_url":
       return t("mcp.errInvalidUrl");
-    case "stdio_forbidden":
-      return t("mcp.errStdio");
     case "reserved_name":
     case "invalid_name":
       return t("mcp.errInvalidName");

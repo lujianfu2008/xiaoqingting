@@ -44,6 +44,13 @@ function parseRange(
   return { start, end };
 }
 
+// 路由级关压缩：这些全是二进制大文件（安装包 98MB/语音模型
+// 118MB），@fastify/compress 会整包 brotli 重压——content-length
+// 被剥掉（改 chunked），electron-updater 算不出进度（浮条恒 0%
+// 退化双路并发），2GB 小服务器现场压缩也吃 CPU。yml/blockmap
+// 才几十/几百 KB，压它没有意义。
+const NO_COMPRESS = { compress: false } as const;
+
 export function registerDownloadRoutes(app: FastifyInstance): void {
   const dir = path.resolve(
     process.env.UPDATE_DIR ?? path.join(config.dataDir, "update"),
@@ -54,7 +61,7 @@ export function registerDownloadRoutes(app: FastifyInstance): void {
   // sherpa-kws ~5MB）。
   const modelsDir = path.join(dir, "models");
 
-  app.get("/download/models/:file", (req, reply) => {
+  app.get("/download/models/:file", NO_COMPRESS, (req, reply) => {
     const file = (req.params as { file: string }).file;
     if (!/^[\w.-]+\.zip$/.test(file)) {
       return reply.code(400).send({ error: "invalid_file" });
@@ -86,7 +93,7 @@ export function registerDownloadRoutes(app: FastifyInstance): void {
       .send(fs.createReadStream(full));
   });
 
-  app.get("/download/:file", (req, reply) => {
+  app.get("/download/:file", NO_COMPRESS, (req, reply) => {
     const file = (req.params as { file: string }).file;
     // 拒绝路径穿越：只允许纯文件名（部署产物名都是 ASCII）。
     if (!/^[\w.-]+$/.test(file)) {

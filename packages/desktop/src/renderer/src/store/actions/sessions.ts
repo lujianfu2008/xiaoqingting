@@ -21,6 +21,7 @@ export function createSessionActions(
   | "ownerOnlineOf"
   | "deleteSession"
   | "closeTab"
+  | "closeOtherTabs"
   | "moveSession"
   | "renameSession"
   | "setCurrentAgent"
@@ -266,6 +267,25 @@ export function createSessionActions(
         if (next) void get().selectSession(next);
         // 焦点移走（或没有 tab 了）：浏览器显示新 tab 的页面/收起。
         get().setBrowserActiveSession(get().currentSessionId);
+      }
+    },
+
+    /** 关除指定 tab 外的全部（tab 右键菜单「关闭其他」；
+     *  目标 tab 不在开列表时视为全关）。 */
+    closeOtherTabs(id) {
+      const { currentSessionId } = get();
+      set((s) => {
+        if (!s.openTabs.includes(id)) {
+          return { openTabs: [], currentSessionId: null, sharedView: false };
+        }
+        return { openTabs: [id] };
+      });
+      if (id !== currentSessionId) {
+        // 逐个 closeTab 语义太重（要换焦点 N 次）；
+        // 这里一次切到保留的 tab。
+        const shared = get().sharedSessions.some((x) => x.session_id === id);
+        if (shared) void get().selectSharedSession(id).catch(() => undefined);
+        else void get().selectSession(id).catch(() => undefined);
       }
     },
 

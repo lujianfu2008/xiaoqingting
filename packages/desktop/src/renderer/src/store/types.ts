@@ -108,6 +108,9 @@ export interface BlmState {
   role: "admin" | "reviewer" | "user"; // 公有域角色（服务端确认；bootstrap admin 恒为 admin）
   wsStatus: WsStatus;
   error: string | null;
+  /** 链路恢复时要撤销的横幅文本（err.sendTimeout 类）：
+   *  连接恢复/任一消息送达即清，不留「过期报错」。 */
+  transientError: string | null;
   // 任务/协作流轻提示：数秒后自动消失的信息条（区别于需人工处理的 error）。
   notice: string | null;
   // Set when startup auto-login was blocked: the account is already signed in
@@ -315,6 +318,8 @@ export interface BlmState {
   appendDraft(text: string): void;
   /** 关闭一个会话 tab（不删会话；关当前 tab 时落到相邻 tab）。 */
   closeTab(id: string): void;
+  /** 关除指定 tab 外的全部（tab 右键「关闭其他」；焦点切到保留的 tab）。 */
+  closeOtherTabs(id: string): void;
   /** 发送一条用户消息；false = 未发出（断线），草稿保留。 */
   send(text: string): boolean;
   /** 重新生成：对当前会话最后一条用户消息再跑一轮回复。 */
@@ -353,6 +358,8 @@ export interface BlmState {
   closeViewerTab(id: string): void;
   /** 总关闭：一键关掉全部 tab 并收起 pane。 */
   closeViewerAll(): void;
+  /** 关掉指定 tab 以外的全部（保留 tab 成为活动）。 */
+  closeViewerOthers(id: string): void;
   /** 关掉指定 tab 左侧的全部（tab 栏菜单）。 */
   closeViewerLeft(id: string): void;
   /** 关掉指定 tab 右侧的全部（tab 栏菜单）。 */

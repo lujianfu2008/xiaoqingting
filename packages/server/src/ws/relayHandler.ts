@@ -4,11 +4,16 @@ import { verifyToken } from "../auth.js";
 import { isDisabled, getStatus, getPasswordChangedAt } from "../users.js";
 import { relayRegistry } from "../relay/registry.js";
 import { handleRelayClientMessage, failPendingOnRelayDrop } from "../relay/llmBridge.js";
+import {
+  handleMcpClientMessage,
+  failPendingMcpOnRelayDrop,
+} from "../relay/mcpIngress.js";
 
 // WS endpoint: /ws/relay?token=<jwt> —— 桌面端 main 进程的中继专用连接。
-// 四道闸与聊天 /ws 相同，但消息是桥接帧（RelayClientMessage：llm_response_*）：
-// 定向投递给该用户的唯一 relay 连接，永不进入聊天通道的 ConnectionRegistry
-// 广播语义。路由注册处 maxPayload 提到 64MiB（长上下文请求体可达数 MB）。
+// 四道闸与聊天 /ws 相同，但消息是桥接帧（RelayClientMessage：llm_response_*
+// 回帧族）：LLM 桥与用户级 MCP 隧道共用此通道与回帧，定向投递给该用户
+// 的唯一 relay 连接，永不进入聊天通道的 ConnectionRegistry 广播语义。
+// 路由注册处 maxPayload 提到 64MiB（长上下文请求体可达数 MB）。
 
 export function handleRelayConnection(socket: WebSocket, req: { url?: string }): void {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -53,7 +58,7 @@ export function handleRelayConnection(socket: WebSocket, req: { url?: string }):
     } catch {
       // socket closing — the close handler cleans up
     }
-  }, 30_000);
+  }, 20_000);
   liveness.unref();
 
   socket.on("message", (raw: unknown) => {
@@ -65,15 +70,20 @@ export function handleRelayConnection(socket: WebSocket, req: { url?: string }):
     }
     const msg = RelayClientMessage.safeParse(parsed);
     if (!msg.success) return; // 非法/未知帧一律丢弃
+    // 回帧同时喂给两座桥：各自按 req_id 认领（pending 独立，互不干扰）。
     handleRelayClientMessage(payload.uid, msg.data);
+    handleMcpClientMessage(payload.uid, msg.data);
   });
 
   const cleanup = () => {
     clearInterval(liveness);
     unregister();
-    // 中继真离线：在途 LLM 请求立刻失败（503/SSE error），不等 300s 无数据
-    // 超时。superseded 顶替不算离线——新连接已接管时 isRelayOnline 仍为 true。
-    if (!relayRegistry.isRelayOnline(payload.uid)) failPendingOnRelayDrop(payload.uid);
+    // 中继真离线：在途请求立刻失败（503），不等各自的无数据超时。
+    // superseded 顶替不算离线——新连接已接管时 isRelayOnline 仍为 true。
+    if (!relayRegistry.isRelayOnline(payload.uid)) {
+      failPendingOnRelayDrop(payload.uid);
+      failPendingMcpOnRelayDrop(payload.uid);
+    }
   };
   socket.on("close", cleanup);
   socket.on("error", cleanup);

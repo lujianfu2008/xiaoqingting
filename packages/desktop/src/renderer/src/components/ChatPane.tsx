@@ -78,6 +78,7 @@ open.delete(b.id);
 return open.size;
 }, [blocks]);
 const error = useStore((s) => s.error);
+const transientError = useStore((s) => s.transientError);
 const notice = useStore((s) => s.notice);
 const wsStatus = useStore((s) => s.wsStatus);
 const voiceSettings = useStore((s) => s.voiceSettings);
@@ -253,7 +254,7 @@ void addFiles(files);
 <ChatMessages
 blocks={blocks}
 streamingText={streamingText}
-error={error}
+error={error ?? transientError}
 notice={notice}
 voiceMsg={voiceMsg}
 noSession={!currentSessionId}

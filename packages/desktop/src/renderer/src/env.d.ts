@@ -48,6 +48,8 @@ declare global {
       forgetSession(sessionId: string): Promise<void>;
       onOpenSettings(cb: () => void): () => void;
       onOpenFiles(cb: () => void): () => void;
+      /** 阅读器内容缩放（Ctrl+=/-/0 经 main 转发）。 */
+      onViewerZoom(cb: (cmd: "in" | "out" | "reset") => void): () => void;
       getLanguage(): Promise<string>;
       setLanguage(lang: "system" | "zh-CN" | "en"): Promise<string>;
       checkLocalLogin(userOrEid: string): Promise<{ locked: boolean }>;

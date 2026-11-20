@@ -1,16 +1,21 @@
 import { useEffect, useState } from "react";
 import { useT } from "../../i18n";
 import { kindOf, loadViewer, type ViewerKind } from "./registry";
+import { useViewerZoom } from "./zoom";
 
 // 阅读器弹窗窗口（主窗「弹窗」按钮打开）：独立 BrowserWindow，
 // 加载同一 renderer 页 + #viewer-popup hash。直接按路径
 // 加载对应 viewer 组件——不依赖主窗的 viewer store（两个窗口
 // 的 store 各自独立，tab 状态不互通，弹窗只负责看这一个文件）。
+// 缩放（Ctrl+滚轮 / Ctrl+=·-·0）同样生效——滚轮监听与
+// 快捷键 IPC 都在本文档里，zip 档按 kind 与主窗分开记。
 
 /** 当前路径对应的按需加载 viewer。 */
 function PopupBody({ path, name, kind }: { path: string; name: string; kind: ViewerKind }): React.JSX.Element | null {
   const t = useT();
   const [Comp, setComp] = useState<Awaited<ReturnType<typeof loadViewer>>>(null);
+  const [zoom, zoomStyle] = useViewerZoom(kind);
+  const layoutZoom = ["text", "code", "markdown", "json"].includes(kind);
 
   useEffect(() => {
     let alive = true;
@@ -24,7 +29,11 @@ function PopupBody({ path, name, kind }: { path: string; name: string; kind: Vie
   }, [kind]);
 
   if (Comp === null) return <div className="viewer-status">{t("vw.unsupported")}</div>;
-  return <Comp path={path} name={name} />;
+  return (
+    <div className="viewer-zoom" style={layoutZoom ? zoomStyle : undefined}>
+      <Comp path={path} name={name} zoom={zoom} />
+    </div>
+  );
 }
 
 /** 弹窗窗口的整页 UI：标题栏（文件名+路径）+ 内容。 */

@@ -69,6 +69,9 @@ export function kindOf(name: string): ViewerKind {
 export interface ViewerProps {
   path: string;
   name: string;
+  /** 内容缩放倍率（Ctrl+滚轮 / Ctrl+=·-·0；见 viewer/zoom.ts）。
+   *  文本类由外层 CSS zoom 生效，无需读它；图片/PDF 自己用。 */
+  zoom?: number;
 }
 
 type Loader = () => Promise<{ default: ComponentType<ViewerProps> }>;

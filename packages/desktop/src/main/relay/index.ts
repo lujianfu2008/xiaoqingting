@@ -1,7 +1,8 @@
 import { StringDecoder } from "node:string_decoder";
 import type { ClientRequest } from "electron";
-import { LlmRequest, RelayServerMessage, type RelayConfigure } from "@blm/protocol";
+import { LlmRequest, McpRequest, RelayServerMessage, type RelayConfigure } from "@blm/protocol";
 import WebSocket from "ws";
+import { handleStdioMcpRequest, shutdownStdioBridge } from "../mcp/stdioBridge.js";
 
 // 桌面端中继连接（main 进程专用，/ws/relay）：把本机网络借给服务端引擎。
 // V2 是消息级桥——收到 llm_request（完整 method/url/headers/body）后用本机
@@ -32,10 +33,22 @@ const STRIP_HEADERS = new Set([
   "accept-encoding",
 ]);
 
+/** 挑出 MCP 隧道需要透传的响应头（mcp-session-id 等；其余忽略）。 */
+function responseHeaders(h: import("node:http").IncomingHttpHeaders): Record<string, string> {
+  const out: Record<string, string> = {};
+  const sid = h["mcp-session-id"];
+  if (typeof sid === "string" && sid) out["mcp-session-id"] = sid;
+  return out;
+}
+
 // ---------- 真实 HTTP 执行器（可注入桩便于 node 级测试） ----------
 
 interface ExecCallbacks {
-  onResponse(status: number, contentType?: string): void;
+  onResponse(
+    status: number,
+    contentType?: string,
+    headers?: Record<string, string>, // MCP 隧道需透传 mcp-session-id 等
+  ): void;
   onData(text: string): void;
   onEnd(err?: string): void;
 }
@@ -60,7 +73,11 @@ function electronExecutor(): HttpExecutor {
     let finished = false;
     creq.on("response", (res) => {
       const ct = res.headers["content-type"];
-      cb.onResponse(res.statusCode ?? 0, Array.isArray(ct) ? ct.join(", ") : ct);
+      cb.onResponse(
+        res.statusCode ?? 0,
+        Array.isArray(ct) ? ct.join(", ") : ct,
+        responseHeaders(res.headers),
+      );
       // StringDecoder 兜住跨 chunk 边界的多字节 UTF-8 字符。
       const decoder = new StringDecoder("utf8");
       res.on("data", (chunk: Buffer) => {
@@ -157,7 +174,7 @@ function nodeHttpExecutor(proxyUrl?: URL): HttpExecutor {
         },
         (res) => {
           const ct = res.headers["content-type"];
-          cb.onResponse(res.statusCode ?? 0, ct);
+          cb.onResponse(res.statusCode ?? 0, ct, responseHeaders(res.headers));
           const decoder = new StringDecoder("utf8");
           res.on("data", (chunk: Buffer) => {
             const text = decoder.write(chunk);
@@ -268,10 +285,10 @@ function compositeExecutor(): HttpExecutor {
       take: ((err: string) => boolean) | null,
       next: (() => void) | null,
     ): ExecCallbacks => ({
-      onResponse: (status, ct) => {
+      onResponse: (status, ct, hdrs) => {
         if (done || settled) return;
         settled = true;
-        cb.onResponse(status, ct);
+        cb.onResponse(status, ct, hdrs);
       },
       onData: (text) => {
         if (!done) cb.onData(text);
@@ -409,6 +426,7 @@ class RelayClient {
       const msg = RelayServerMessage.safeParse(parsed);
       if (!msg.success) return; // 非法/未知帧一律丢弃
       if (msg.data.type === "llm_request") this.handleRequest(msg.data);
+      else if (msg.data.type === "mcp_request") this.handleMcpRequest(msg.data);
       // llm_cancel：服务端已放弃该响应（引擎侧中断），abort 本端请求。
       else this.pending.get(msg.data.req_id)?.abort();
     });
@@ -471,6 +489,7 @@ class RelayClient {
     for (const h of this.pending.values()) h.abort();
     this.pending.clear();
     this.attempt = 0;
+    shutdownStdioBridge();
   }
 
   private send(msg: Record<string, unknown>): void {
@@ -517,6 +536,91 @@ class RelayClient {
   private executorOrElectron(): HttpExecutor {
     if (!this.executor) this.executor = compositeExecutor();
     return this.executor;
+  }
+
+  // ---------- 用户级 MCP 隧道 ----------
+
+  private handleMcpRequest(msg: McpRequest): void {
+    if (this.pending.size >= RELAY_REQUEST_MAX) {
+      this.send({ type: "llm_response_end", req_id: msg.req_id, error: "请求并发已达上限" });
+      return;
+    }
+    this.requestsTotal += 1;
+
+    // stdio：spawn 本机子进程走 JSON-RPC；http/sse：本机网络直接
+    // 转发（127.0.0.1 由此才指向用户自己的机器——服务端连不到）。
+    if (msg.spawn) {
+      const handle = handleStdioMcpRequest(
+        {
+          req_id: msg.req_id,
+          name: msg.name,
+          body: msg.body,
+          spawn: msg.spawn,
+        },
+        {
+          onHead: (status, contentType) => {
+            this.send({
+              type: "llm_response_head",
+              req_id: msg.req_id,
+              status,
+              ...(contentType ? { content_type: contentType } : {}),
+            });
+          },
+          onData: (data) => {
+            this.send({ type: "llm_response_chunk", req_id: msg.req_id, data });
+          },
+          onEnd: (err) => {
+            if (this.pending.get(msg.req_id) === handle) this.pending.delete(msg.req_id);
+            if (err) this.requestsFailed += 1;
+            this.send({
+              type: "llm_response_end",
+              req_id: msg.req_id,
+              ...(err ? { error: err.slice(0, 300) } : {}),
+            });
+          },
+        },
+      );
+      this.pending.set(msg.req_id, handle);
+      return;
+    }
+
+    const headers = { ...(msg.headers ?? {}) };
+    for (const k of STRIP_HEADERS) delete headers[k];
+    let handle: { abort(): void } = { abort: () => undefined };
+    handle = this.executorOrElectron()(
+      {
+        method: msg.method,
+        url: msg.url ?? "",
+        headers,
+        body: msg.body,
+      },
+      {
+        onResponse: (status, contentType, hdrs) => {
+          // MCP 需要透传响应头（Mcp-Session-Id 等）——streamable-http
+          // 会话关联靠它。
+          this.send({
+            type: "llm_response_head",
+            req_id: msg.req_id,
+            status,
+            ...(contentType ? { content_type: contentType } : {}),
+            ...(hdrs && Object.keys(hdrs).length > 0 ? { headers: hdrs } : {}),
+          });
+        },
+        onData: (data) => {
+          this.send({ type: "llm_response_chunk", req_id: msg.req_id, data });
+        },
+        onEnd: (err) => {
+          if (this.pending.get(msg.req_id) === handle) this.pending.delete(msg.req_id);
+          if (err) this.requestsFailed += 1;
+          this.send({
+            type: "llm_response_end",
+            req_id: msg.req_id,
+            ...(err ? { error: err.slice(0, 300) } : {}),
+          });
+        },
+      },
+    );
+    this.pending.set(msg.req_id, handle);
   }
 }
 

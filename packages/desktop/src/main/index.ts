@@ -30,7 +30,7 @@ import {
   seedModelStates,
   type ModelName,
 } from "./modelFetch";
-import { applyAppMenu, setLanguage } from "./menu";
+import { applyAppMenu, setLanguage, wireShellZoom } from "./menu";
 import { resolveLanguage } from "./i18n";
 import { currentLanguage } from "./menu";
 import { closeToTray, destroyTray, trayIconPath } from "./tray";
@@ -79,6 +79,10 @@ function createWindow(): void {
   normalizeZoom();
   win.webContents.on("zoom-changed", normalizeZoom);
   win.webContents.on("did-finish-load", normalizeZoom);
+  // 阅读器内容缩放快捷键（Ctrl+= / Ctrl+- / Ctrl+0）：
+  // 壳自身禁止缩放（上面钉死 1），这三键转发给 renderer
+  // 应用到内置阅读器内容上（shell-zoom.ts → viewer 组件）。
+  wireShellZoom(win.webContents);
 
   // 只有 ✕ 可拦截：设置→关闭按钮行为=托盘 时点关闭进托盘。最小化不拦截：
   // — 始终正常缩到任务栏（拦截的话任务栏点击/Win+D 都会"消失"进托盘）。

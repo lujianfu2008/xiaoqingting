@@ -11,6 +11,7 @@ import { registerRoutes } from "./rest/routes.js";
 import { handleConnection } from "./ws/handler.js";
 import { handleRelayConnection } from "./ws/relayHandler.js";
 import { setRelayProxyResolver, startRelayIngress } from "./relay/llmBridge.js";
+import { startMcpIngress } from "./relay/mcpIngress.js";
 import { startOpenAiCompatServer } from "./openaiCompat.js";
 import { ensureDiagTaskDir } from "./diagTaskManager.js";
 
@@ -64,6 +65,9 @@ async function main(): Promise<void> {
   // 「当前负责人」由 AgentManager 晚绑定注入——relay 层不依赖 agent 层。
   await startRelayIngress();
   setRelayProxyResolver((sid) => manager.executorOf(sid));
+
+  // 用户级 MCP 隧道入口（同一模式，钉死会话主人）。
+  await startMcpIngress();
 
   await app.listen({ port: config.port, host: config.host });
   console.log(`小蜻蜓服务端已启动: http://${config.host}:${config.port}`);

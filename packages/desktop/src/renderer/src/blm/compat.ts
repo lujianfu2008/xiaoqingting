@@ -113,6 +113,9 @@ export function createBlmCompat(): typeof window.blm {
 
     onOpenSettings: () => () => undefined,
     onOpenFiles: () => () => undefined,
+    // 无原生菜单/快捷键来源，缩放只走页面内手势（未来壳侧
+    // 提供时经这里接）。滚轮监听在 renderer，无需壳配合。
+    onViewerZoom: () => () => undefined,
 
     getLanguage: () => Promise.resolve(uiLang()),
     setLanguage: (lang: Parameters<Blm["setLanguage"]>[0]) => {

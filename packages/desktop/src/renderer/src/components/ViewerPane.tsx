@@ -6,15 +6,23 @@ import { FileTree } from "./viewer/FileTree";
 import { ViewerTabBar } from "./viewer/TabBar";
 import { ViewerSplitter } from "./viewer/ViewerSplitter";
 import { kindOf, loadViewer, type ViewerKind } from "./viewer/registry";
+import { useViewerZoom } from "./viewer/zoom";
 
 // 内置文件阅读器 pane：bar（文件名 + 模式按钮）+ body =
 // 文件树（可折叠）| tab 栏 + 内容。viewer 组件按 kind 动态
-// import（未用到的格式解析器不进主壳）。
+// import（未用到的格式解析器不进主壳）。内容缩放
+// （Ctrl+滚轮 / Ctrl+=·-·0，见 viewer/zoom.ts）：文本类加在
+// 包裹层（CSS zoom 参与排版），图片/PDF 收 zoom 值自己缩
+// （图片 scale 本体、PDF 按新倍率重渲，见各 viewer）；
+// 音视频缩放无意义，不缩。树与 tab 栏不跟着动。
+
+const ZOOMS_LAYOUT = new Set<string>(["text", "code", "markdown", "json"]);
 
 /** 当前 tab 内容：按需加载的 viewer 组件。 */
 function ViewerBody({ path, name, kind }: { path: string; name: string; kind: ViewerKind }): React.JSX.Element | null {
   const t = useT();
   const [Comp, setComp] = useState<Awaited<ReturnType<typeof loadViewer>>>(null);
+  const [zoom, zoomStyle] = useViewerZoom(kind);
 
   useEffect(() => {
     let alive = true;
@@ -29,7 +37,11 @@ function ViewerBody({ path, name, kind }: { path: string; name: string; kind: Vi
 
   if (Comp === undefined) return null;
   if (Comp === null) return <div className="viewer-status">{t("vw.unsupported")}</div>;
-  return <Comp path={path} name={name} />;
+  return (
+    <div className="viewer-zoom" style={ZOOMS_LAYOUT.has(kind) ? zoomStyle : undefined}>
+      <Comp path={path} name={name} zoom={zoom} />
+    </div>
+  );
 }
 
 export function ViewerPane(props: { chrome?: PaneChrome }): React.JSX.Element | null {

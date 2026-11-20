@@ -9,6 +9,10 @@ import { z } from "zod";
 // 写回引擎。隧道消息只出现在 /ws/relay 通道，用这里的独立 union，不进聊天
 // 通道的 ServerMessage/ClientMessage。
 //
+// mcp_request 复用同一通道与回帧族：用户级 MCP 服务器（「我的」）的
+// 实际连接由会话主人的桌面发起（本机 http/sse 直接转发、stdio 桌面
+// spawn），服务端只存配置不代连。
+//
 // 请求体与 SSE 都是文本——全程纯文本 JSON，无 base64、无字节分块、无背压
 // 轮询；上游响应若声明 gzip 等压缩编码会破坏文本性，服务端转发时剔除
 // accept-encoding（见 llmBridge）。
@@ -26,6 +30,43 @@ export const LlmRequest = z.object({
 });
 export type LlmRequest = z.infer<typeof LlmRequest>;
 
+/** 桌面 spawn 一个用户级 stdio MCP 服务器的启动参数（command/args/env
+ * 只经这条帧从服务端到桌面，绝不进引擎面）。 */
+export const McpSpawn = z.object({
+  command: z.string().min(1).max(2048),
+  args: z.array(z.string().max(2048)).max(64).optional(),
+  env: z.record(z.string(), z.string().max(8000)).optional(),
+});
+export type McpSpawn = z.infer<typeof McpSpawn>;
+
+/** 服务端 → 桌面：代发一条 MCP 请求（用户级 MCP 隧道）。
+ * - 无 spawn：http/sse 远程服务器，url 为真实目标，桌面照 LLM 中继
+ *   原样转发（响应头带 Mcp-Session-Id 等，需透传）。
+ * - 有 spawn：stdio 服务器，桌面 spawn 子进程、按 newline-delimited
+ *   JSON-RPC 走 stdin/stdout（name 用于进程复用，url 省略）。
+ */
+export const McpRequest = z
+  .object({
+    type: z.literal("mcp_request"),
+    req_id: ReqId,
+    method: z.enum(["GET", "POST", "DELETE"]),
+    /** MCP 服务器名（进程复用键 + 日志）。 */
+    name: z.string().max(64),
+    url: z.string().max(2048).optional(),
+    headers: z.record(z.string(), z.string().max(4000)).optional(),
+    body: z.string().max(32 * 1024 * 1024).optional(),
+    spawn: McpSpawn.optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.spawn && v.url) {
+      ctx.addIssue({ code: "custom", message: "stdio 隧道请求不应携带 url" });
+    }
+    if (!v.spawn && !v.url?.trim()) {
+      ctx.addIssue({ code: "custom", message: "远程隧道请求需要 url" });
+    }
+  });
+export type McpRequest = z.infer<typeof McpRequest>;
+
 /** 服务端 → 桌面：引擎侧中断（用户点停止/请求断开），桌面 abort 对应请求。 */
 export const LlmCancel = z.object({
   type: z.literal("llm_cancel"),
@@ -33,12 +74,14 @@ export const LlmCancel = z.object({
 });
 export type LlmCancel = z.infer<typeof LlmCancel>;
 
-/** 桌面 → 服务端：响应状态与内容类型（分片之前发一次）。 */
+/** 桌面 → 服务端：响应状态与内容类型（分片之前发一次）。headers 透传
+ * 响应头（MCP 需要 Mcp-Session-Id 等；LLM 路径不传，向后兼容）。 */
 export const LlmResponseHead = z.object({
   type: z.literal("llm_response_head"),
   req_id: ReqId,
   status: z.number().int().min(100).max(599),
   content_type: z.string().max(300).optional(),
+  headers: z.record(z.string(), z.string().max(4000)).optional(),
 });
 export type LlmResponseHead = z.infer<typeof LlmResponseHead>;
 
@@ -58,7 +101,11 @@ export const LlmResponseEnd = z.object({
 });
 export type LlmResponseEnd = z.infer<typeof LlmResponseEnd>;
 
-export const RelayServerMessage = z.discriminatedUnion("type", [LlmRequest, LlmCancel]);
+export const RelayServerMessage = z.discriminatedUnion("type", [
+  LlmRequest,
+  LlmCancel,
+  McpRequest,
+]);
 export type RelayServerMessage = z.infer<typeof RelayServerMessage>;
 
 export const RelayClientMessage = z.discriminatedUnion("type", [

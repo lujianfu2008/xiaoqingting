@@ -2,6 +2,7 @@ import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { LANGUAGES, menuStrings, resolveLanguage } from "./i18n";
 import { loadSettings, patchSettings, type Language } from "./settings";
 import { safeSend, windowAlive } from "./safeSend";
+import { wireViewerZoom } from "./zoom";
 
 // Localized application menu (文件/编辑/视图/窗口/设置/帮助). Electron
 // roles keep every accelerator and native behavior; only labels are overridden.
@@ -23,6 +24,25 @@ export function setLanguage(lang: Language): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (windowAlive(w)) safeSend(w.webContents, "blm:menu:lang-changed", resolved);
   }
+}
+
+// 阅读器缩放快捷键（Ctrl+= / Ctrl+- / Ctrl+0）：壳窗口拦截
+// 后发给自己的 renderer（viewer 组件订阅 blm:viewer:zoom
+// 应用到内容上）。不用菜单 accelerator：accelerator 全局生效，
+// 会把按键从聚焦的内置浏览器页面手里抢走（那里同键是页面
+// 缩放，键表在 zoom.ts）；before-input-event 的 preventDefault
+// 同样压掉菜单快捷键，两边各管各的聚焦面。缩放壳本身是
+// 禁止的（createWindow 把 zoomFactor 钉死 1——UI 缩放防漂移）。
+export const wireShellZoom = wireViewerZoom;
+
+/** 视图菜单的缩放项（无 accelerator，键走 wireShellZoom）。 */
+function sendViewerZoom(
+  win: Electron.BaseWindow | undefined,
+  cmd: "in" | "out" | "reset",
+): void {
+  // Electron types this as BaseWindow; only BrowserWindow has contents.
+  const w = win as BrowserWindow | undefined;
+  if (windowAlive(w)) safeSend(w.webContents, "blm:viewer:zoom", cmd);
 }
 
 export function buildAppMenu(langSetting: Language): Menu {
@@ -63,9 +83,20 @@ export function buildAppMenu(langSetting: Language): Menu {
         { role: "forceReload", label: t.forceReload },
         { role: "toggleDevTools", label: t.devTools },
         { type: "separator" },
-        { role: "resetZoom", label: t.resetZoom },
-        { role: "zoomIn", label: t.zoomIn },
-        { role: "zoomOut", label: t.zoomOut },
+        // 缩放是阅读器内容的缩放（见 wireShellZoom）——role
+        // 的目标（壳窗口）被钉死 zoomFactor=1，role 是死键。
+        {
+          label: t.zoomIn,
+          click: (mi, win) => sendViewerZoom(win, "in"),
+        },
+        {
+          label: t.zoomOut,
+          click: (mi, win) => sendViewerZoom(win, "out"),
+        },
+        {
+          label: t.resetZoom,
+          click: (mi, win) => sendViewerZoom(win, "reset"),
+        },
         { type: "separator" },
         { role: "togglefullscreen", label: t.fullscreen },
       ],

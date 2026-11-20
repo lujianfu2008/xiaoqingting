@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { uiStrings } from "./i18n";
 import { loadSettings } from "./settings";
+import { wireShellZoom } from "./menu";
 import {
   ViewerListDirRequest,
   ViewerListDirResult,
@@ -205,6 +206,8 @@ export function registerViewerIpc(): void {
         sandbox: false,
       },
     });
+    // 弹窗也挂阅读器缩放快捷键（主窗的钩子只覆盖主窗）。
+    wireShellZoom(win.webContents);
     const hash = `#viewer-popup?path=${encodeURIComponent(p)}`;
     if (process.env.ELECTRON_RENDERER_URL) {
       void win.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);

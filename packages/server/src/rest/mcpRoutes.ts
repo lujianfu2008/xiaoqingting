@@ -14,7 +14,6 @@ import { searchRegistry } from "../mcpRegistry.js";
 import {
   McpConfigError,
   RESERVED_MCP_NAMES,
-  assertPublicHttpUrl,
   deleteUserServer,
   getUserServers,
   loadGlobalServers,
@@ -26,9 +25,12 @@ import {
 } from "../mcpConfig.js";
 
 // MCP 服务器管理端点。
-// 用户级（/api/mcp/*）：仅远程 http/sse，URL 做私网过滤防 SSRF；
-// 全局（/api/admin/mcp/*）：仅公有域管理员，允许 stdio（服务器上 spawn 子进程
-// 等价服务器执行权限）。写入后丢弃空闲会话，下一条消息用新配置重建。
+// 用户级（/api/mcp/*）：http/sse + stdio 均可（stdio 与连接都由
+// 会话主人的桌面发起，服务器只存配置、绝不代连——也因此无需做
+// 私网/回环过滤，127.0.0.1 指向用户自己的机器）；全局
+// （/api/admin/mcp/*）：仅公有域管理员，允许 stdio（服务器上 spawn
+// 子进程等价服务器执行权限）。写入后丢弃空闲会话，下一条消息用
+// 新配置重建。
 
 function validName(name: string): boolean {
   return McpServerName.safeParse(name).success && !RESERVED_MCP_NAMES.has(name);
@@ -78,16 +80,10 @@ async function checkImportEntry(
   const def = normalizeDef(entry);
   if (!def) return "invalid_def";
   if ((def.type === "http" || def.type === "sse") && !def.url?.trim()) return "invalid_def";
-  if (!toGlobal) {
-    // stdio 只进全局（管理员）；远程 URL 过 SSRF。
-    if (def.type === "stdio") return "stdio_forbidden";
-    try {
-      await assertPublicHttpUrl(def.url!.trim());
-    } catch (e) {
-      if (e instanceof McpConfigError) return e.code;
-      throw e;
-    }
-  }
+  if (toGlobal && def.type === "stdio" && !def.command?.trim()) return "invalid_def";
+  // 用户级不再做 URL 私网过滤：连接由用户桌面发起，127.0.0.1 指向
+  // 用户自己的机器，不是服务端内网；stdio 也由桌面 spawn。
+  // 全局仅管理员可写（写的人本来就在圈内），同样无需过滤。
   return null;
 }
 
@@ -101,15 +97,7 @@ export function registerMcpRoutes(app: FastifyInstance, manager: AgentManager): 
     if (!validName(name)) return reply.code(400).send({ error: "invalid_name" });
     const parsed = UpsertMcpServerRequest.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
-    if (parsed.data.type === "stdio") {
-      return reply.code(400).send({ error: "stdio_forbidden" });
-    }
-    try {
-      await assertPublicHttpUrl(parsed.data.url!.trim());
-    } catch (e) {
-      if (e instanceof McpConfigError) return reply.code(400).send({ error: e.code });
-      throw e;
-    }
+    // 类型/URL 不再受服务端限制（stdio/回环地址都合法：连接由桌面发起）。
     setUserServer(req.userId, name, parsed.data);
     manager.disposeIdleSessions(req.userId);
     return toClientView(name, parsed.data, "user", name in loadGlobalServers());

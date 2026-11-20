@@ -7,6 +7,7 @@ import {
 import { loadSettings } from "../settings";
 import { uiStrings } from "../i18n";
 import { safeSend, windowAlive } from "../safeSend";
+import { wirePageZoom } from "../zoom";
 
 // Browser surfaces: one embedded WebContentsView per session that has
 // opened a page, plus at most one popup window. Only the *active*
@@ -76,6 +77,10 @@ export function state(): BrowserState {
   return { mode: "embedded", open: false, url: "", title: "", session_id: sid };
 }
 
+// 页面缩放（Ctrl+=/-/0 + Ctrl+滚轮）走共享键表
+// （../zoom.ts 的 wirePageZoom）——与阅读器缩放同键
+// 同步进，只差落点。
+
 function wire(wc: Electron.WebContents, onGone?: () => void): void {
   const refresh = (): void => emit();
   wc.on("did-navigate", refresh);
@@ -86,6 +91,7 @@ function wire(wc: Electron.WebContents, onGone?: () => void): void {
     onGone?.();
     emit();
   });
+  wirePageZoom(wc);
   // Keep agent-driven navigation inside the built-in browser; external links
   // would otherwise open a real OS browser the snapshot tool cannot see.
   wc.setWindowOpenHandler(({ url }) => {
@@ -267,7 +273,13 @@ export async function snapshot(
   }
   if (!wc) return { ok: false, error: "浏览器未打开。" };
   try {
-    const t = await wc.executeJavaScript("document.body ? document.body.innerText : ''", false);
+    // 网页正文动辄几万字，全量塞进上下文会拖慢每一轮后续请求
+    // （快照 20KB+ → 请求 73KB → 模型思考更久）。截到 6KB：
+    // 覆盖绝大多数页面主体，代理工具输出也按这个量级设计。
+    const t = await wc.executeJavaScript(
+      "document.body ? document.body.innerText.slice(0, 6000) : ''",
+      false,
+    );
     return { ok: true, text: typeof t === "string" ? t : "" };
   } catch (e) {
     return { ok: false, error: `读取页面失败：${(e as Error).message}` };

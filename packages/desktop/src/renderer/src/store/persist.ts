@@ -18,6 +18,8 @@ export const LS = {
   updateToastPos: "blm.updateToastPos",
   // 代码高亮主题（highlight.js 官方模板名；见 viewer/codeTheme.ts）。
   codeTheme: "blm.codeTheme",
+  // 阅读器内容缩放（按格式 kind 记，JSON {kind: 倍率}；缺省 = 1）。
+  viewerZoom: "blm.viewerZoom",
   // 界面主题（见 theme/uiTheme.ts；缺省 = 墨蓝深色）。
   uiTheme: "blm.uiTheme",
   // 阅读器文件树宽度（px，树右缘拖条；缺省 = 200）。

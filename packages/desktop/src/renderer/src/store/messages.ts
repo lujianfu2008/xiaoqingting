@@ -9,6 +9,10 @@ import type { BlmState, GetState, SetState } from "./types";
 
 /** Translate one server WS message into store mutations. */
 export function handleMessage(msg: ServerMessage, set: SetState, get: GetState): void {
+  // 链路活性证明：任何服务端帧都说明网络通了——
+  // 「消息可能未送达」类横幅（transientError）就此撤销，
+  // 不把过期报错一直挂在聊天区。
+  if (get().transientError) set({ transientError: null });
   switch (msg.type) {
     case "message_delta":
       set((s) => ({

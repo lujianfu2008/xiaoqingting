@@ -24,6 +24,7 @@ export function SessionTabs(): React.JSX.Element | null {
   const selectSession = useStore((s) => s.selectSession);
   const selectSharedSession = useStore((s) => s.selectSharedSession);
   const closeTab = useStore((s) => s.closeTab);
+  const closeOtherTabs = useStore((s) => s.closeOtherTabs);
   const t = useT();
   const [menu, setMenu] = useState<MenuState | null>(null);
 
@@ -47,6 +48,7 @@ export function SessionTabs(): React.JSX.Element | null {
       { label: t("vw.closeThis"), disabled: false, run: () => closeTab(id) },
       { label: t("vw.closeRight"), disabled: idx < 0 || idx === openTabs.length - 1, run: () => { openTabs.slice(idx + 1).forEach((x) => closeTab(x)); } },
       { label: t("vw.closeLeft"), disabled: idx <= 0, run: () => { openTabs.slice(0, idx).forEach((x) => closeTab(x)); } },
+      { label: t("vw.closeOthers"), disabled: idx < 0 || openTabs.length <= 1, run: () => closeOtherTabs(id) },
       { label: t("vw.closeAllTabs"), disabled: false, run: () => { [...openTabs].forEach((x) => closeTab(x)); } },
     ];
   };

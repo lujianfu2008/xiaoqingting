@@ -1,7 +1,9 @@
 // Output caps shared by the local executor actions.
 export const CMD_TIMEOUT_MS = 90_000;
 export const MAX_OUTPUT = 50_000; // chars
-export const MAX_PAGE_TEXT = 20_000;
+// 网页快照上限：正文截到 6KB——页面快照动辄 20KB+，全量进上下文
+// 会拖慢之后每一轮请求（请求体越大，模型思考越久）。
+export const MAX_PAGE_TEXT = 6_000;
 // Attachment (read_attachment) size cap: keeps the base64 copy well within
 // WS frame limits on both hops (client→server, server→engine).
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;

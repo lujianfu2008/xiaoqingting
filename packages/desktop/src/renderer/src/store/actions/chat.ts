@@ -131,7 +131,9 @@ export function createChatActions(
       // 正常、回复会接上。
       armSendAck(clientMsgId, sid, outgoing, () => {
         set((s) => ({
-          error: t("err.sendTimeout"),
+          // 走 transientError：链路恢复（下一条消息送达/重连）即
+          // 撤销——常驻 error 区只服务「需要人工处理」的事。
+          transientError: t("err.sendTimeout"),
           busy:
             pendingAcksForSession(sid) > 0
               ? s.busy

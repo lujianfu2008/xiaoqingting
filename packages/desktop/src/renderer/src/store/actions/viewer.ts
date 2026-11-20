@@ -14,6 +14,7 @@ export function createViewerActions(
   | "openViewerFiles"
   | "closeViewerTab"
   | "closeViewerAll"
+  | "closeViewerOthers"
   | "closeViewerLeft"
   | "closeViewerRight"
   | "activateViewerTab"
@@ -85,6 +86,21 @@ export function createViewerActions(
         viewer: { open: false, tabs: [], activeId: null, treeRoot: cur.treeRoot, treeCollapsed: cur.treeCollapsed },
         viewerAutoSuppressed: true,
       });
+    },
+
+    /** 关掉指定 tab 以外的全部（tab 栏右键菜单「关闭其他」；
+     *  保留目标 tab 为活动。目标不存在 = 全关收 pane）。 */
+    closeViewerOthers(id) {
+      const cur = get().viewer;
+      const keep = cur.tabs.find((x) => x.id === id);
+      if (!keep) {
+        set({
+          viewer: { open: false, tabs: [], activeId: null, treeRoot: cur.treeRoot, treeCollapsed: cur.treeCollapsed },
+          viewerAutoSuppressed: true,
+        });
+        return;
+      }
+      set({ viewer: { ...cur, tabs: [keep], activeId: keep.id, open: true } });
     },
 
     /** 关掉指定 tab 左侧的全部（tab 栏右键菜单）。 */

@@ -21,6 +21,17 @@ export function socketOpen(): boolean {
 
 export function sendJson(payload: unknown): void {
   if (!socketOpen()) return;
+  // 半开连接上 OS 发送缓冲会只积不清：先看队列水位，堆积说明
+  // 链路已死（正常情况下 WS 帧极小、即刻排空），别把消息推进
+  // 黑洞——让上层走失败路径（放回输入框）而不是等 15s ack 超时。
+  if (ws!.bufferedAmount > 64 * 1024) {
+    try {
+      ws!.close();
+    } catch {
+      // already closing
+    }
+    return;
+  }
   ws!.send(JSON.stringify(payload));
 }
 

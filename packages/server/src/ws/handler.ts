@@ -65,7 +65,7 @@ export function handleConnection(
     } catch {
       // socket closing — the close handler cleans up
     }
-  }, 30_000);
+  }, 20_000);
   liveness.unref();
 
   // 公有域管理员上线：补推当前待审申请（持久化即投递，WS 只是实时提醒）。
