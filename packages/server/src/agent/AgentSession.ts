@@ -118,6 +118,9 @@ export class AgentSession {
   private onDispose?: () => void;
   private requests: ClientRequests;
   private gate = new DelegationGateImpl();
+  /** 引擎循环的完结信号（consume() 的 Promise）：disposeAsync 用它等
+   *  子进程死透。start() 前是已解决的占位，await 永不悬挂。 */
+  private loopDone: Promise<void> = Promise.resolve();
 
   constructor(
     record: SessionRecord,
@@ -158,7 +161,7 @@ export class AgentSession {
       publicCtx ? { ...publicCtx, role } : undefined,
     );
     this.q = query({ prompt: this.turnQueue, options });
-    void this.consume();
+    this.loopDone = this.consume();
   }
 
   /** Session belongs to a public project → use the server-side public executor. */
@@ -352,6 +355,19 @@ export class AgentSession {
     this.setBusy(false);
     // 通知持有方把自己从会话表摘掉，防止僵尸会话吞掉后续消息。
     this.onDispose?.();
+  }
+
+  /** 发起回收并等引擎循环真正退出。撤回消息做转录手术前必须走这条：
+   *  引擎子进程退出时会把它内存里的整份转录回写落盘——dispose() 发起
+   *  杀进程后立刻手术，退出回写会把裁掉的内容原样写回（实测踩过）。
+   *  兜底超时防止悬挂；迭代器结束≠子进程已退出，再留一拍落定窗口。 */
+  async disposeAsync(timeoutMs = 5000): Promise<void> {
+    this.dispose();
+    await Promise.race([
+      this.loopDone,
+      new Promise<void>((r) => setTimeout(r, timeoutMs)),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 300));
   }
 
   get isBusy(): boolean {

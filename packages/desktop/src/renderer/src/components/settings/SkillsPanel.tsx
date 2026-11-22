@@ -1,25 +1,52 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
-import { useT } from "../../i18n";
-import type { SkillInfo, SkillRegistryCard } from "@blm/protocol";
+import { fileToBase64 } from "../../store/actions/skills";
+import { useT, type T } from "../../i18n";
+import { getMarketLang, setMarketLang, type MarketLang } from "../../lib/marketLang";
+import type { ImportSkillsResult, SkillInfo, SkillRegistryCard } from "@blm/protocol";
 
 // 专家技能设置面板：技能列表（全局 + 我的）、安装表单（SKILL.md 全文）、
-// 粘贴导入、市场搜索。安装即可用（无独立启停），同名安装即更新；删除即卸载。
-// 仅支持纯文档技能（SKILL.md），脚本型技能包不在支持范围（面板文案有说明）。
+// 粘贴导入、压缩包安装、市场搜索。安装即可用（可停用/启用，可编辑 SKILL.md）；
+// 同名安装即更新，删除即卸载。仅支持纯文档技能（SKILL.md），脚本型技能包
+// 不在支持范围（压缩包导入时带脚本的技能组整组跳过并如实告知）。
 
 type Scope = "user" | "global";
 
 const SKIP_REASON_KEYS: Record<
   string,
-  "skills.skipInvalidName" | "skills.skipInvalidDef" | "skills.skipTooLarge"
+  | "skills.skipInvalidName"
+  | "skills.skipInvalidDef"
+  | "skills.skipTooLarge"
+  | "skills.skipScript"
+  | "skills.skipDup"
 > = {
   invalid_name: "skills.skipInvalidName",
   missing_frontmatter: "skills.skipInvalidDef",
   too_large: "skills.skipTooLarge",
+  script_bundle: "skills.skipScript",
+  dup_name: "skills.skipDup",
 };
 
 function sourceTagKey(info: SkillInfo): "skills.globalTag" | "skills.mineTag" {
   return info.source === "global" ? "skills.globalTag" : "skills.mineTag";
+}
+
+/** 批量导入结果 → 一行反馈文案（粘贴导入与压缩包安装共用）。 */
+function describeImport(res: ImportSkillsResult, t: T): string {
+  const parts: string[] = [];
+  if (res.imported.length > 0) {
+    parts.push(t("skills.importOk", { names: res.imported.join(", ") }));
+  }
+  if (res.skipped.length > 0) {
+    const list = res.skipped
+      .map((s) => {
+        const key = SKIP_REASON_KEYS[s.reason];
+        return `${s.name} (${key ? t(key) : s.reason})`;
+      })
+      .join(", ");
+    parts.push(t("skills.importSkipped", { list }));
+  }
+  return parts.join("　") || t("skills.saveFail");
 }
 
 // ---------- 粘贴导入 ----------
@@ -38,20 +65,7 @@ function ImportBox({ scope }: { scope: Scope }): React.JSX.Element {
     try {
       const res =
         scope === "global" ? await importGlobalSkills(text) : await importSkills(text);
-      const parts: string[] = [];
-      if (res.imported.length > 0) {
-        parts.push(t("skills.importOk", { names: res.imported.join(", ") }));
-      }
-      if (res.skipped.length > 0) {
-        const list = res.skipped
-          .map((s) => {
-            const key = SKIP_REASON_KEYS[s.reason];
-            return `${s.name} (${key ? t(key) : s.reason})`;
-          })
-          .join(", ");
-        parts.push(t("skills.importSkipped", { list }));
-      }
-      setMsg(parts.join("　") || t("skills.saveFail"));
+      setMsg(describeImport(res, t));
       if (res.imported.length > 0) setText("");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : t("skills.saveFail"));
@@ -86,13 +100,76 @@ function ImportBox({ scope }: { scope: Scope }): React.JSX.Element {
   );
 }
 
-// ---------- 安装表单（新增；同名即更新） ----------
+// ---------- 压缩包安装（zip；服务端只提取 SKILL.md） ----------
 
-function SkillForm({ scope, onDone }: { scope: Scope; onDone: () => void }): React.JSX.Element {
+function ArchiveBox({ scope }: { scope: Scope }): React.JSX.Element {
+  const t = useT();
+  const importArchive = useStore((s) =>
+    scope === "global" ? s.importGlobalSkillsArchive : s.importSkillsArchive,
+  );
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const run = async (file: File): Promise<void> => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const base64 = await fileToBase64(file);
+      const res = await importArchive(base64, file.name);
+      setMsg(describeImport(res, t));
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : t("skills.saveFail"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{t("skills.archiveTitle")}</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button style={{ fontSize: 12 }} disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? t("skills.archiving") : t("skills.archiveBtn")}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".zip,application/zip"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) void run(f);
+          }}
+        />
+        {msg && (
+          <span style={{ fontSize: 11, color: "var(--accent)", wordBreak: "break-all" }}>{msg}</span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+        {t("skills.archiveHint")}
+      </div>
+    </div>
+  );
+}
+
+// ---------- 安装表单（新增；同名即更新；initial 有值 = 编辑模式，名称锁定） ----------
+
+function SkillForm({
+  scope,
+  initial,
+  onDone,
+}: {
+  scope: Scope;
+  initial?: { name: string; markdown: string } | null;
+  onDone: () => void;
+}): React.JSX.Element {
   const t = useT();
   const saveSkill = useStore((s) => (scope === "global" ? s.saveGlobalSkill : s.saveSkill));
-  const [name, setName] = useState("");
-  const [markdown, setMarkdown] = useState("");
+  const editing = !!initial;
+  const [name, setName] = useState(initial?.name ?? "");
+  const [markdown, setMarkdown] = useState(initial?.markdown ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -130,6 +207,7 @@ function SkillForm({ scope, onDone }: { scope: Scope; onDone: () => void }): Rea
         <label>{t("skills.name")}</label>
         <input
           value={name}
+          disabled={editing}
           onChange={(e) => setName(e.target.value)}
           placeholder={t("skills.namePh")}
         />
@@ -164,7 +242,14 @@ function SkillSection({ scope, title }: { scope: Scope; title: string }): React.
   const deleteSkill = useStore((s) =>
     scope === "global" ? s.deleteGlobalSkill : s.deleteSkill,
   );
+  const readSkillMd = useStore((s) =>
+    scope === "global" ? s.readGlobalSkill : s.readSkill,
+  );
+  const setEnabled = useStore((s) =>
+    scope === "global" ? s.setGlobalSkillEnabled : s.setSkillEnabled,
+  );
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<{ name: string; markdown: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const remove = async (info: SkillInfo): Promise<void> => {
@@ -177,54 +262,110 @@ function SkillSection({ scope, title }: { scope: Scope; title: string }): React.
     }
   };
 
+  const edit = async (info: SkillInfo): Promise<void> => {
+    setErr(null);
+    try {
+      const markdown = await readSkillMd(info.name);
+      setEditing({ name: info.name, markdown });
+      setFormOpen(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : t("skills.saveFail"));
+    }
+  };
+
+  const toggle = async (info: SkillInfo): Promise<void> => {
+    setErr(null);
+    try {
+      await setEnabled(info.name, info.enabled === false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : t("skills.saveFail"));
+    }
+  };
+
+  const openForm = (): void => {
+    setEditing(null);
+    setFormOpen(true);
+  };
+
   return (
     <div style={{ marginBottom: 16 }}>
       <div
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}
       >
         <div style={{ fontSize: 12, fontWeight: 600 }}>{title}</div>
-        <button style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => setFormOpen(true)}>
+        <button style={{ fontSize: 11, padding: "2px 8px" }} onClick={openForm}>
           {t("skills.add")}
         </button>
       </div>
 
-      {formOpen && <SkillForm scope={scope} onDone={() => setFormOpen(false)} />}
+      {formOpen && (
+        <SkillForm
+          key={editing?.name ?? "__new__"}
+          scope={scope}
+          initial={editing}
+          onDone={() => {
+            setFormOpen(false);
+            setEditing(null);
+          }}
+        />
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {(skills ?? []).length === 0 && (
           <div style={{ fontSize: 11, color: "var(--muted)" }}>{t("skills.empty")}</div>
         )}
-        {(skills ?? []).map((info) => (
-          <div
-            key={info.name}
-            style={{
-              border: "1px solid var(--border, #ccc)",
-              borderRadius: 6,
-              padding: "6px 10px",
-              fontSize: 12,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <strong>{info.title || info.name}</strong>
-              <span style={{ fontSize: 10, color: "var(--muted)" }}>{info.name}</span>
-              <span style={{ fontSize: 10, color: "var(--muted)" }}>
-                {t(sourceTagKey(info))}
-              </span>
-              <span style={{ flex: 1 }} />
-              <button
-                style={{ fontSize: 11, padding: "1px 8px" }}
-                onClick={() => void remove(info)}
-              >
-                {t("skills.delete")}
-              </button>
-            </div>
-            {info.description && (
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, wordBreak: "break-all" }}>
-                {info.description}
+        {(skills ?? []).map((info) => {
+          const disabled = info.enabled === false;
+          return (
+            <div
+              key={info.name}
+              style={{
+                border: "1px solid var(--border, #ccc)",
+                borderRadius: 6,
+                padding: "6px 10px",
+                fontSize: 12,
+                opacity: disabled ? 0.55 : 1,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <strong>{info.title || info.name}</strong>
+                <span style={{ fontSize: 10, color: "var(--muted)" }}>{info.name}</span>
+                <span style={{ fontSize: 10, color: "var(--muted)" }}>
+                  {t(sourceTagKey(info))}
+                </span>
+                {disabled && (
+                  <span style={{ fontSize: 10, color: "var(--accent)" }}>
+                    {t("skills.disabledTag")}
+                  </span>
+                )}
+                <span style={{ flex: 1 }} />
+                <button
+                  style={{ fontSize: 11, padding: "1px 8px" }}
+                  onClick={() => void edit(info)}
+                >
+                  {t("skills.edit")}
+                </button>
+                <button
+                  style={{ fontSize: 11, padding: "1px 8px" }}
+                  onClick={() => void toggle(info)}
+                >
+                  {disabled ? t("skills.enable") : t("skills.disable")}
+                </button>
+                <button
+                  style={{ fontSize: 11, padding: "1px 8px" }}
+                  onClick={() => void remove(info)}
+                >
+                  {t("skills.delete")}
+                </button>
               </div>
-            )}
-          </div>
-        ))}
+              {info.description && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, wordBreak: "break-all" }}>
+                  {info.description}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       {err && <div className="error-text" style={{ marginTop: 6 }}>{err}</div>}
     </div>
@@ -233,7 +374,13 @@ function SkillSection({ scope, title }: { scope: Scope; title: string }): React.
 
 // ---------- 市场（清单搜索 + 一键安装） ----------
 
-function MarketSection(): React.JSX.Element {
+function MarketSection({
+  lang,
+  onSwitchLang,
+}: {
+  lang: MarketLang;
+  onSwitchLang: (v: MarketLang) => void;
+}): React.JSX.Element {
   const t = useT();
   const isAdmin = useStore((s) => s.role) === "admin";
   const searchSkillRegistry = useStore((s) => s.searchSkillRegistry);
@@ -256,6 +403,10 @@ function MarketSection(): React.JSX.Element {
       setCards(res.skills);
       setDone({});
     } catch (e) {
+      // 每次查找的结果只属于这次查找：失败时清掉上一轮的列表再报错，
+      // 绝不让旧结果冒充本次的命中（历史记录残留不符合直觉）。
+      setCards(null);
+      setDone({});
       setErr(e instanceof Error ? e.message : t("skills.registryFail"));
     } finally {
       setBusy(false);
@@ -266,9 +417,11 @@ function MarketSection(): React.JSX.Element {
     setInstalling(card.id);
     setErr(null);
     try {
-      if (toGlobal) await installGlobalSkill(card.install_name, card.url);
-      else await installSkill(card.install_name, card.url);
-      setDone((d) => ({ ...d, [card.id]: card.install_name }));
+      // 服务端可能对名字做了规范化（返回最终落库名），以它为准展示。
+      const res = toGlobal
+        ? await installGlobalSkill(card.install_name, card.url)
+        : await installSkill(card.install_name, card.url);
+      setDone((d) => ({ ...d, [card.id]: res?.name ?? card.install_name }));
     } catch (e) {
       setErr(e instanceof Error ? e.message : t("skills.saveFail"));
     } finally {
@@ -279,6 +432,25 @@ function MarketSection(): React.JSX.Element {
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t("skills.marketTitle")}</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("market.lang")}</span>
+        {(["zh", "en"] as const).map((v) => (
+          <button
+            key={v}
+            className={lang === v ? "primary" : ""}
+            style={{ fontSize: 11 }}
+            onClick={() => {
+              if (v === lang) return;
+              // 先落地语言再搜：search 读 getMarketLang()，后切会拿旧语言
+              // 搜出旧语言的卡片（看起来像残留的历史结果）。
+              onSwitchLang(v);
+              if (q.trim() && cards !== null) void search();
+            }}
+          >
+            {v === "zh" ? t("market.langZh") : t("market.langEn")}
+          </button>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 6 }}>
         <input
           style={{ flex: 1 }}
@@ -368,6 +540,8 @@ export function SkillsPanel(): React.JSX.Element {
   const loadSkills = useStore((s) => s.loadSkills);
   const loadGlobalSkills = useStore((s) => s.loadGlobalSkills);
   const isAdmin = role === "admin";
+  // 描述语言（与市场开关共用偏好）：切换时市场自动重搜、已安装列表重拉。
+  const [lang, setLang] = useState<MarketLang>(getMarketLang());
 
   useEffect(() => {
     void loadSkills();
@@ -376,6 +550,14 @@ export function SkillsPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
+  const switchLang = (v: MarketLang): void => {
+    if (v === lang) return;
+    setLang(v);
+    setMarketLang(v);
+    void loadSkills();
+    if (isAdmin) void loadGlobalSkills();
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", maxWidth: 520 }}>
       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.7, marginBottom: 10 }}>
@@ -383,7 +565,8 @@ export function SkillsPanel(): React.JSX.Element {
       </div>
       <SkillSection scope="user" title={t("skills.listMine")} />
       <ImportBox scope="user" />
-      <MarketSection />
+      <ArchiveBox scope="user" />
+      <MarketSection lang={lang} onSwitchLang={switchLang} />
       {isAdmin && (
         <>
           <div
@@ -391,6 +574,7 @@ export function SkillsPanel(): React.JSX.Element {
           />
           <SkillSection scope="global" title={t("skills.listGlobal")} />
           <ImportBox scope="global" />
+          <ArchiveBox scope="global" />
         </>
       )}
     </div>

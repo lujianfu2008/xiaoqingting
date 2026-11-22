@@ -268,6 +268,55 @@
   padding: 14px 24px;
   border-top: 1px solid var(--border);
   background: var(--panel);
+  position: relative; /* 斜杠专家菜单（.slash-menu）的定位原点 */
+}
+
+/* ---------- 斜杠呼叫专家（输入框上方浮层） ---------- */
+/* 层级：压过聊天内容与按钮列，低于全局对话框（dialogs.css z:10 之上
+   的全局弹窗都在 900+，这里取 30 即可，不与它们争层）。 */
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 24px;
+  min-width: 300px;
+  max-width: 480px;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 30;
+}
+
+.slash-menu button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  text-align: left;
+  border-radius: 8px;
+}
+
+.slash-menu button.active,
+.slash-menu button:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.slash-menu .slash-name {
+  font-weight: 600;
+}
+
+.slash-menu .slash-desc {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- 会话 tab 栏（聊天面板顶部） ---------- */

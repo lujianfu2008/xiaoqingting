@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { useT } from "../../i18n";
+import { getMarketLang, setMarketLang, type MarketLang } from "../../lib/marketLang";
 import type { McpRegistryCard, McpServerDef, McpServerInfo } from "@blm/protocol";
 
 // MCP 设置面板：服务器列表（全局 + 我的）、表单增改、从市场粘贴导入。
@@ -457,6 +458,7 @@ function MarketSection(): React.JSX.Element {
   const [done, setDone] = useState<Record<string, string>>({}); // card.id → 已安装为 xxx
   const [note, setNote] = useState<Record<string, string>>({}); // card.id → 安装后提示
   const [err, setErr] = useState<string | null>(null);
+  const [lang, setLangState] = useState<MarketLang>(getMarketLang());
 
   const search = async (fresh: boolean): Promise<void> => {
     const query = q.trim();
@@ -519,6 +521,24 @@ function MarketSection(): React.JSX.Element {
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t("mcp.marketTitle")}</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("market.lang")}</span>
+        {(["zh", "en"] as const).map((v) => (
+          <button
+            key={v}
+            className={lang === v ? "primary" : ""}
+            style={{ fontSize: 11 }}
+            onClick={() => {
+              if (v === lang) return;
+              setLangState(v);
+              setMarketLang(v);
+              if (q.trim() && cards !== null) void search(true);
+            }}
+          >
+            {v === "zh" ? t("market.langZh") : t("market.langEn")}
+          </button>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 6 }}>
         <input
           style={{ flex: 1 }}

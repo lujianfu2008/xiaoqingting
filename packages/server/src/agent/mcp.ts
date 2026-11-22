@@ -66,7 +66,12 @@ function toSdkConfig(
         ? mcpTunnelUrlFor(userId, sessionId, name)
         : null
       : null;
-  if (tunnel) return { type: "http", url: tunnel };
+  if (tunnel) {
+    console.info(
+      `[mcp] 用户级服务器 ${name} 已改写为隧道（主人 ${userId}，会话 ${sessionId}）`,
+    );
+    return { type: "http", url: tunnel };
+  }
   if (def.type === "stdio") {
     return { type: "stdio", command: def.command ?? "", args: def.args, env: def.env };
   }

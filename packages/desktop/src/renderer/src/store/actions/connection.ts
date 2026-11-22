@@ -74,7 +74,13 @@ export function createConnectionActions(
         resetReconnectAttempt();
         // 重连成功：清掉断线期间留下的「连接已断开，请稍后再发」
         // 与「消息可能未送达」类旧提示，恢复后聊天区不挂过期报错。
-        set({ wsStatus: "connected", error: null, transientError: null });
+        set({
+          wsStatus: "connected",
+          error: null,
+          errorCode: null,
+          errorSession: null,
+          transientError: null,
+        });
         startHeartbeat(ws, () => onLinkDead(4000, "heartbeat_timeout"));
         // 网络中继：把 serverUrl+JWT 下发给 main 进程（token 只存 main 内存，
         // 绝不写盘）。失败静默——中继是增强能力，不影响聊天主链路。

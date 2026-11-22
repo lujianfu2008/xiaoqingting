@@ -264,6 +264,7 @@ export const AUDIT_ACTIONS = [
   // 全局专家技能变更（管理员）。
   "skills.global_save",
   "skills.global_delete",
+  "skills.global_toggle",
   // 客户端出口中继配置变更（管理员）。
   "relay.config_save",
   // 远程诊断任务（管理员借用在线客户端的智能体排障）。

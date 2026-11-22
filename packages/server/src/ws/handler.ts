@@ -124,6 +124,14 @@ export function handleConnection(
       case "regenerate":
         manager.handleRegenerate(payload.uid, msg.data.session_id);
         break;
+      case "recall_message":
+        manager.handleRecallMessage(
+          payload.uid,
+          msg.data.session_id,
+          msg.data.ordinal,
+          msg.data.prefix,
+        );
+        break;
       case "permission_response":
         manager.handlePermissionResponse(payload.uid, msg.data.request_id, msg.data.allow);
         break;

@@ -1,8 +1,6 @@
 import crypto from "node:crypto";
-import dns from "node:dns";
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isPrivateAddress } from "../mcpConfig.js";
 import { getUserServers } from "../mcpConfig.js";
 import type { McpServerDef } from "@blm/protocol";
 import { relayRegistry } from "./registry.js";
@@ -15,10 +13,10 @@ import { relayRegistry } from "./registry.js";
 //               其个人配置，共享会话借用宿主的能力，不做负责人候选）；
 //     name   —— 服务器名：查主人的用户级配置拿真实目标/启动参数。
 //
-// 三类转发：
-// - http/sse 远程服务器：URL 原样包装成 mcp_request 由桌面转发；
-//   桌面离线且 URL 为公网 → 服务端直连兜底（不把可用网关打成不可用），
-//   URL 为私网/回环 → 只能桌面转发，离线即 503。
+// 两类转发（用户级一律只经桌面中转，服务端绝不自己直连——能力在用户
+// 的机器与网络上；注册配置摘要随帧下发，桌面知道自己在代连哪个注册项）：
+// - http/sse 远程服务器：URL 原样包装成 mcp_request 由桌面转发，注册的
+//   headers 由服务端注入；桌面离线即 503，无任何直连兜底。
 // - stdio：桌面 spawn 子进程（spawn 参数只经隧道帧到桌面，绝不进
 //   引擎面），桌面离线 → 503。
 //
@@ -47,9 +45,38 @@ interface PendingMcp {
   host: string;
   headersSent: boolean;
   idleTimer: NodeJS.Timeout;
+  /** initialize 请求：响应头须注入 Mcp-Session-Id=<值>（SDK 据此建立会话）。 */
+  assignSid?: string;
 }
 
 const pending = new Map<string, PendingMcp>();
+
+// ---------- stdio 会话映射 ----------
+// MCP 的 initialize 是「连接级」握手，而 stdio 桥跑的是有状态子进程：
+// 每条 MCP 客户端连接（每个引擎会话重建）都必须有自己的进程，否则第二条
+// 连接的 initialize 会被已初始化的服务器以 Method not found 拒绝。
+// 用协议标准的 Mcp-Session-Id 头承载：initialize 时签发，SDK 自动回传，
+// ingress 换算成帧里的 conn 交桌面按连接分进程。
+
+const MCP_SESSION_TTL_MS = 30 * 60_000;
+const mcpSessions = new Map<string, { owner: string; name: string; at: number }>();
+
+function mcpSessionSweep(): void {
+  const cutoff = Date.now() - MCP_SESSION_TTL_MS;
+  for (const [sid, s] of mcpSessions) {
+    if (s.at < cutoff) mcpSessions.delete(sid);
+  }
+}
+
+/** 解析 JSON-RPC 请求体的 method（非 JSON 或无 method = null）。 */
+function rpcMethodOf(body: string): string | null {
+  try {
+    const m = (JSON.parse(body) as { method?: unknown }).method;
+    return typeof m === "string" ? m : null;
+  } catch {
+    return null;
+  }
+}
 
 let ingress: http.Server | null = null;
 let ingressPort: number | null = null;
@@ -122,7 +149,6 @@ async function handleIngressRequest(
   }
   const owner = decodeURIComponent(m[1]);
   const serverName = decodeURIComponent(m[3]);
-  const remainder = (m[4] ?? "/") + query;
 
   const def = getUserServers(owner)[serverName];
   if (!def) {
@@ -154,26 +180,85 @@ async function handleIngressRequest(
     if (STRIP_HEADERS.has(k)) continue;
     headers[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
   }
+  // 注册配置里的 headers（鉴权等）到这里才注入：引擎只见隧道地址，带不了
+  // 它们。配置头覆盖同名请求头（请求头经 Node 已是小写，这里统一小写键）。
+  if (def.type !== "stdio" && def.headers) {
+    for (const [k, v] of Object.entries(def.headers)) {
+      headers[k.toLowerCase()] = v;
+    }
+  }
 
   if (def.type === "stdio") {
+    // GET（SDK 初始化后尝试开服务端→客户端 SSE 流）：stdio 门面不提供，
+    // 本地按规范回 405，SDK 视为「服务器不支持」正常继续——不值得为此
+    // 打一趟桌面隧道。
+    if ((req.method ?? "POST") === "GET") {
+      failJson(res, 405, "stdio MCP 不提供服务端流");
+      return;
+    }
+    // 连接身份解析：initialize = 新连接（签发会话）；其余必须带已签发的
+    // Mcp-Session-Id（SDK 全程自动回传），未知会话按规范回 404——客户端
+    // 重新 initialize 即可重建（服务端重启后内存会话表清空的兜底路径）。
+    const sidHeader = req.headers["mcp-session-id"];
+    const sid = Array.isArray(sidHeader) ? sidHeader[0] : sidHeader;
+    let conn: string | undefined;
+    let assignSid: string | undefined;
+    if ((req.method ?? "POST") === "DELETE") {
+      // SDK terminateSession：注销会话并让桌面终结进程；会话未知也回 200
+      //（规范允许服务器不接受终结，这里别让 SDK 报错）。
+      const s = sid ? mcpSessions.get(sid) : undefined;
+      if (s && s.owner === owner && s.name === serverName) {
+        mcpSessions.delete(sid!);
+        conn = sid;
+      } else {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+        return;
+      }
+    } else {
+      const method = rpcMethodOf(body);
+      if (method === "initialize") {
+        mcpSessionSweep();
+        conn = crypto.randomBytes(16).toString("hex");
+        assignSid = conn;
+        mcpSessions.set(conn, { owner, name: serverName, at: Date.now() });
+      } else if (sid) {
+        const s = mcpSessions.get(sid);
+        if (!s || s.owner !== owner || s.name !== serverName) {
+          failJson(res, 404, "MCP 会话不存在或已过期，请重新初始化");
+          return;
+        }
+        conn = sid;
+        s.at = Date.now();
+      } else {
+        failJson(res, 404, "缺少 Mcp-Session-Id，请先 initialize");
+        return;
+      }
+    }
     await forwardToDesktop(res, owner, {
-      method: "POST",
+      method: (req.method ?? "POST") as "GET" | "POST" | "DELETE",
       name: serverName,
       headers,
       ...(body.length > 0 ? { body } : {}),
+      ...(conn ? { conn } : {}),
       spawn: {
         command: def.command ?? "",
         ...(def.args ? { args: def.args } : {}),
         ...(def.env ? { env: def.env } : {}),
       },
+      assignSid,
     });
     return;
   }
 
-  // 远程 http/sse：目标 = 真实 base_url ‖ remainder（字符串拼接；
-  // new URL(path, base) 会丢 base 自带的 path 部分）。
+  // 远程 http/sse：目标 = 真实 base_url ‖ 附加路径（字符串拼接；
+  // new URL(path, base) 会丢 base 自带的 path 部分）。引擎打的是隧道根
+  // 路径——注册 URL 是什么就打什么，绝不强加尾斜杠（否则
+  // 「http://host/mcp」会被打成「/mcp/」，严格匹配路径的服务器必 404，
+  // 2026-11 tips-mcp 就栽在这）。
   const base = (def.url ?? "").replace(/\/+$/, "");
-  const target = base + remainder;
+  const extra = m[4] && m[4] !== "/" ? m[4] : "";
+  const target = base + extra + query;
   if (proxyLoad(owner) >= REQ_CONCURRENCY_MAX) {
     failJson(res, 429, "MCP 隧道请求并发已达上限");
     return;
@@ -185,39 +270,13 @@ async function handleIngressRequest(
     url: target,
     headers,
     ...(body.length > 0 ? { body } : {}),
+    // 注册配置摘要随帧下发：桌面由此知道自己在代连哪个注册项。
+    server: { type: def.type, ...(def.url ? { url: def.url } : {}) },
   });
-  if (sent) return;
-
-  // 桌面离线：公网 URL 退服务端直连兜底；私网/回环只能桌面转发。
-  if (isPrivateAddress(await resolveHost(target))) {
-    failJson(res, 503, "MCP 隧道不可用：桌面端不在线（本机地址仅桌面可连）");
-    return;
-  }
-  await passThroughDirect(req, res, owner, target, headers, body);
-}
-
-async function resolveHost(target: string): Promise<string> {
-  let host: string;
-  try {
-    host = new URL(target).hostname.toLowerCase();
-  } catch {
-    return "";
-  }
-  if (isPrivateAddress(host)) return host;
-  if (
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal")
-  ) {
-    return "localhost";
-  }
-  try {
-    const addrs = await dns.promises.lookup(host, { all: true });
-    if (addrs.some((a) => isPrivateAddress(a.address))) return host;
-    return "";
-  } catch {
-    return "";
+  if (!sent) {
+    // 一律桌面中转：桌面不在线就失败，服务端不直连兜底（用户级 MCP 的
+    // 可达性往往只属于用户自己的网络，服务端直连只会打错机器）。
+    failJson(res, 503, "MCP 隧道不可用：桌面端不在线");
   }
 }
 
@@ -231,7 +290,10 @@ function sendMcpRequest(
     url?: string;
     headers?: Record<string, string>;
     body?: string;
+    conn?: string;
     spawn?: { command: string; args?: string[]; env?: Record<string, string> };
+    server?: { type: "http" | "sse" | "stdio"; url?: string };
+    assignSid?: string;
   },
 ): boolean {
   const reqId = crypto.randomBytes(8).toString("hex");
@@ -252,6 +314,7 @@ function sendMcpRequest(
     host,
     headersSent: false,
     idleTimer: setTimeout(() => finish(reqId, "MCP 隧道请求超时（无数据）"), REQ_IDLE_TIMEOUT_MS),
+    ...(frame.assignSid ? { assignSid: frame.assignSid } : {}),
   };
   pending.set(reqId, entry);
   console.info(`[mcp] ${owner} → 桌面 ${host}`);
@@ -278,7 +341,14 @@ function sendMcpRequest(
   const sent = relayRegistry.sendTo(owner, {
     type: "mcp_request",
     req_id: reqId,
-    ...frame,
+    method: frame.method,
+    name: frame.name,
+    ...(frame.url ? { url: frame.url } : {}),
+    ...(frame.headers ? { headers: frame.headers } : {}),
+    ...(frame.body ? { body: frame.body } : {}),
+    ...(frame.conn ? { conn: frame.conn } : {}),
+    ...(frame.spawn ? { spawn: frame.spawn } : {}),
+    ...(frame.server ? { server: frame.server } : {}),
   });
   if (!sent) {
     pending.delete(reqId);
@@ -295,7 +365,9 @@ async function forwardToDesktop(
     name: string;
     headers: Record<string, string>;
     body?: string;
+    conn?: string;
     spawn: { command: string; args?: string[]; env?: Record<string, string> };
+    assignSid?: string;
   },
 ): Promise<void> {
   if (proxyLoad(owner) >= REQ_CONCURRENCY_MAX) {
@@ -305,47 +377,6 @@ async function forwardToDesktop(
   const sent = sendMcpRequest(res, owner, frame);
   if (!sent) {
     failJson(res, 503, "MCP 隧道不可用：桌面端不在线");
-  }
-}
-
-/** 桌面离线且 URL 为公网：服务端直连兜底，响应原样写回。 */
-async function passThroughDirect(
-  req: IncomingMessage,
-  res: ServerResponse,
-  owner: string,
-  target: string,
-  headers: Record<string, string>,
-  body: string,
-): Promise<void> {
-  console.info(`[mcp] ${owner} → 直连兜底 ${target.split("?")[0]}`);
-  const abort = new AbortController();
-  res.on("close", () => abort.abort());
-  let upstream: Response;
-  try {
-    upstream = await fetch(target, {
-      method: req.method ?? "POST",
-      headers,
-      body: body.length > 0 ? body : undefined,
-      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(600_000)]),
-    });
-  } catch (err) {
-    failJson(res, 502, `直连 MCP 服务器失败：${(err as Error).message}`);
-    return;
-  }
-  if (res.destroyed) return;
-  const outHeaders: Record<string, string> = {
-    "content-type": upstream.headers.get("content-type") ?? "application/json",
-  };
-  const sid = upstream.headers.get("mcp-session-id");
-  if (sid) outHeaders["mcp-session-id"] = sid;
-  res.writeHead(upstream.status, outHeaders);
-  try {
-    for await (const chunk of upstream.body ?? []) {
-      if (res.destroyed) break;
-      res.write(chunk as Buffer);
-    }
-  } finally {
-    res.end();
   }
 }
 
@@ -381,6 +412,8 @@ export function handleMcpClientMessage(
         for (const [k, v] of Object.entries(msg.headers ?? {})) {
           if (!STRIP_HEADERS.has(k.toLowerCase())) headers[k.toLowerCase()] = v;
         }
+        // initialize 响应：注入会话头，SDK 从此每帧回传（stdio 会话的根）。
+        if (entry.assignSid) headers["mcp-session-id"] = entry.assignSid;
         entry.res.writeHead(msg.status, headers);
       } catch {
         finish(msg.req_id, "写响应头失败");

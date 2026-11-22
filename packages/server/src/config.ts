@@ -60,9 +60,13 @@ export const config = {
   asrModel: env("ASR_MODEL", "glm-asr"),
   // 官方 MCP Registry（市场搜索代理的上游），自建镜像时可换。
   mcpRegistryUrl: env("MCP_REGISTRY_URL", "https://registry.modelcontextprotocol.io"),
-  // 专家技能市场清单 URL（JSON：{"skills":[...]}）；空 = 市场搜索不可用，
-  // 安装/粘贴导入不受影响。
+  // 专家技能市场清单来源："official" = 官方技能库目录（官方仓库的
+  // marketplace.json 展开+收录过滤）；或直接给 JSON 清单 URL
+  // （{"skills":[...]}）。空 = 市场搜索不可用，安装/粘贴导入不受影响。
   skillsRegistryUrl: env("SKILLS_REGISTRY_URL", ""),
+  // 官方技能库模式的 raw 下载代理前缀（本机到 GitHub 直连极慢时配
+  // ghproxy 类镜像；清单与 SKILL.md 的 raw URL 都会套上它）。
+  skillsRegistryGhProxy: env("SKILLS_REGISTRY_GHPROXY", "").replace(/\/+$/, ""),
 };
 
 export function ensureDataDirs(): void {

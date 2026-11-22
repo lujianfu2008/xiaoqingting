@@ -1,7 +1,12 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionRecord } from "../store.js";
 import { config } from "../config.js";
-import { getUserLlmConfig, getUserMaxBudgetUsd, modelSupportsVision } from "../llmConfig.js";
+import {
+  engineApiTimeoutBudgetMs,
+  getUserLlmConfig,
+  getUserMaxBudgetUsd,
+  modelSupportsVision,
+} from "../llmConfig.js";
 import { relayIngressFor } from "../relay/llmBridge.js";
 import { openaiCompatBaseFor } from "../openaiCompat.js";
 import type { AgentRole } from "./agents.js";
@@ -98,7 +103,9 @@ export function buildSessionOptions(
   }
   // 给引擎的 LLM API 请求设超时（CLI 认的 API_TIMEOUT_MS）：上游长时间不吐
   // 响应头时转成重试/报错，而不是无限等。管不到流中途的停摆——那由
-  // AgentSession 的回合看门狗兜底。
+  // AgentSession 的回合看门狗兜底。个人配置会话改由适配层给出「重试 × 候选数」
+  // 的总预算（见 llmConfig.engineApiTimeoutBudgetMs），别让引擎打断适配层的
+  // 自动切换链。
   engineEnv.API_TIMEOUT_MS = String(process.env.API_TIMEOUT_MS ?? "180000");
   // 引擎运行环境隔离：把引擎当独立"住户"对待——
   // - HOME/TMPDIR 重定向到数据目录内的中性路径：引擎把转录文本、
@@ -114,30 +121,33 @@ export function buildSessionOptions(
   engineEnv.CLAUDE_CODE_DISABLE_TELEMETRY = "1";
   engineEnv.CLAUDE_CODE_DISABLE_ERROR_REPORTING = "1";
   engineEnv.CLAUDE_CODE_DISABLE_AUTOUPDATER = "1";
+  // 个人配置流量统一过本地适配层（/t=OpenAI 翻译、/a=Anthropic 透传）：
+  // 超时/重试/多配置自动切换都在适配层实现，鉴权按候选注入。适配层未启动
+  // （理论上仅启动早期）则退回旧行为：引擎直连配置里的 base_url（此时中继
+  // 照旧可以接管）。
+  const compatBase = openaiCompatBaseFor();
   if (llm) {
     // ANTHROPIC_AUTH_TOKEN wins over ANTHROPIC_API_KEY in the SDK, hence it
     // must be explicitly cleared when using a personal key.
     engineEnv.ANTHROPIC_AUTH_TOKEN = undefined;
     engineEnv.ANTHROPIC_API_KEY = llm.api_key;
-    engineEnv.ANTHROPIC_BASE_URL = llm.base_url?.trim() || undefined;
     engineEnv.ANTHROPIC_MODEL = undefined; // model 只经 options.model 传入
-  }
-  // OpenAI 协议网关：引擎的 Anthropic 请求发往本地翻译层（鉴权/真实目标都在
-  // 服务端处置）。适配层未启动（理论上仅启动早期）则维持原样。路径带 session_id：
-  // 翻译层据此在请求时解析「当前负责人」决定借哪台桌面代发（工作台跟随指派）。
-  const compatBase = llm?.protocol === "openai" ? openaiCompatBaseFor() : null;
-  if (llm && compatBase) {
-    engineEnv.ANTHROPIC_BASE_URL = `${compatBase}/t/${encodeURIComponent(record.user_id)}/s/${encodeURIComponent(record.session_id)}`;
+    if (compatBase) {
+      engineEnv.ANTHROPIC_BASE_URL = `${compatBase}/${llm.protocol === "openai" ? "t" : "a"}/${encodeURIComponent(record.user_id)}/s/${encodeURIComponent(record.session_id)}`;
+      engineEnv.API_TIMEOUT_MS = String(engineApiTimeoutBudgetMs(record.user_id));
+    } else {
+      engineEnv.ANTHROPIC_BASE_URL = llm.base_url?.trim() || undefined;
+    }
   }
   // 网络中继（消息级 LLM 桥）：管理员总开关开启且主人或当前负责人 opt-in 时，
   // 引擎的 LLM base_url 指向共享中继入口，请求作为 WS 消息由某台桌面端代发。
   // 入口地址**不写死代发人**——代发人逐请求解析（负责人优先、主人兜底），
   // 任务流转换负责人无需重建会话。桌面此刻全离线也注入：请求时回 503 走既有
-  // agent_error 路径，任一桌面重连后下一条消息自动恢复。放在 llm 块之后覆盖
-  // 个人 base_url——真实目标由入口在每条请求里给桌面端。OpenAI 协议时不覆盖：
-  // 引擎已指向翻译层，翻译层自己决定是否借桌面发上游。
+  // agent_error 路径，任一桌面重连后下一条消息自动恢复。只对「没走到适配层」
+  // 的会话生效——引擎已指向适配层时，出网借不借桌面由适配层逐请求决定
+  // （多配置切换的候选网关各不相同，入口的 /g 显式目标路由承接）。
   const relayBase = relayIngressFor(record.user_id, record.session_id);
-  if (relayBase && !compatBase) {
+  if (relayBase && (!llm || !compatBase)) {
     engineEnv.ANTHROPIC_BASE_URL = relayBase;
   }
   // 费用上限：用户「我的大模型」里的设置优先（0 = 不限）；未设置跟全局
@@ -165,7 +175,14 @@ export function buildSessionOptions(
           public: createPublicServer(publicCtx.run),
         }
       : {
-          ...buildMcpServers(config.engineCwd, record.user_id),
+          // sessionId 必传：用户级 MCP 的隧道改写以「主人+会话」为键
+          // （mcp.ts 的 userId && sessionId 守卫）——漏传会让用户级服务器
+          // 拿裸 URL 由服务端直连（回环地址必然拒绝），工具静默挂不上。
+          ...buildMcpServers(
+            config.engineCwd,
+            record.user_id,
+            record.session_id,
+          ),
           client: clientProxyEntry(execSink, record.session_id, attachmentMode),
         },
     includePartialMessages: true,

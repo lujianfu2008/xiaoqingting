@@ -30,6 +30,9 @@ return Number.isFinite(n) && n > 0 ? n : fallback;
 
 const EMPTY_ATTACHMENTS: SessionAttachment[] = [];
 
+// 斜杠菜单条目：专家技能（✦）与 MCP 服务器（🔌）统一形状。
+type SlashItem = { kind: "skill" | "mcp"; name: string; title: string; desc: string };
+
 export function ChatPane(props: { chrome?: PaneChrome }): React.JSX.Element {const currentSessionId = useStore((s) => s.currentSessionId);
 // 当前会话绑定的协作流任务（普通会话为 undefined，流程条不渲染）。
 const task = useStore((s) =>
@@ -94,6 +97,7 @@ const t = useT();
 const send = useStore((s) => s.send);
 const interrupt = useStore((s) => s.interrupt);
 const regenerate = useStore((s) => s.regenerate);
+const recallMessage = useStore((s) => s.recallMessage);
 // 草稿放 store：发送失败（ack 超时/断线）时能把文本放回该会话。
 // 按会话隔离——tab 并开时各 tab 的草稿互不串（字符串兜底，
 // 非 ?? ""，同理不会引发死循环——字符串按值比较）。
@@ -112,6 +116,59 @@ const addAttachments = useStore((s) => s.addAttachments);
 const removeAttachment = useStore((s) => s.removeAttachment);
 const [noSessionHint, setNoSessionHint] = useState(false);
 const [attachHint, setAttachHint] = useState<string | null>(null);
+// —— 斜杠呼叫专家 ——
+// 草稿恰为「/token」时在输入框上方浮出专家菜单（专家=专家技能；store.skills
+// 为全局+我的合并视图，设置页改动后自动新鲜）。↑↓ 选择、Enter/Tab 补全为
+// 「/name 」、Esc 关闭；点击同样补全。Esc 用「记住被关时的草稿」实现——
+// 换个 token 会重新浮出，不会误伤正常打字。
+const skills = useStore((s) => s.skills);
+const loadSkills = useStore((s) => s.loadSkills);
+const mcpServers = useStore((s) => s.mcpServers);
+const loadMcpServers = useStore((s) => s.loadMcpServers);
+const [slashIndex, setSlashIndex] = useState(0);
+const [slashDismissedAt, setSlashDismissedAt] = useState<string | null>(null);
+// 空 token（只打了「/」）列出全部；匹配为不区分大小写的子串模糊
+// （名称/标题/描述都参与）。服务端同名时技能优先，菜单里两样都列。
+const slashToken = /^\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,63})?$/.exec(draft)?.[1] ?? null;
+const slashMatches = useMemo(() => {
+if (slashToken === null) return [];
+const q = slashToken.toLowerCase();
+const items: SlashItem[] = [];
+for (const s of skills ?? []) {
+items.push({ kind: "skill", name: s.name, title: s.title || s.name, desc: s.description });
+}
+for (const m of mcpServers ?? []) {
+if (m.enabled === false) continue;
+items.push({
+kind: "mcp",
+name: m.name,
+title: m.name,
+desc: `MCP · ${m.type}${m.url ? ` · ${m.url}` : m.command ? ` · ${m.command}` : ""}`,
+});
+}
+if (q === "") return items;
+return items.filter(
+(it) =>
+it.name.toLowerCase().includes(q) ||
+it.title.toLowerCase().includes(q) ||
+it.desc.toLowerCase().includes(q),
+);
+}, [slashToken, skills, mcpServers]);
+const slashOpen = slashToken !== null && slashDismissedAt !== draft && slashMatches.length > 0;
+const slashIdx = slashMatches.length > 0 ? Math.min(slashIndex, slashMatches.length - 1) : 0;
+// 菜单数据懒加载：首次出现斜杠且列表尚未加载时各拉一次。
+useEffect(() => {
+if (slashToken === null) return;
+if (!skills) void loadSkills();
+if (!mcpServers) void loadMcpServers();
+}, [slashToken, skills, mcpServers, loadSkills, loadMcpServers]);
+useEffect(() => {
+setSlashIndex(0);
+}, [slashToken]);
+const completeSlash = (s: { name: string }): void => {
+setDraft(`/${s.name} `);
+setSlashIndex(0);
+};
 const fileInputRef = useRef<HTMLInputElement>(null);
 const appendDraft = useStore((s) => s.appendDraft);
 const { recording, voiceMsg, toggleRecording } = useVoiceInput(currentSessionId, appendDraft);
@@ -262,6 +319,13 @@ sessionId={currentSessionId}
 bottomRef={bottomRef}
 busy={busy}
 onRegenerate={regenerate}
+onRecall={
+  // 撤回只给主人视图（共享视图/协作线程借用视图不出现按钮；
+  // 服务端同样仅主人可撤）。撤的是当前打开的会话。
+  !sharedView && currentSessionId
+    ? (ordinal, prefix) => recallMessage(currentSessionId, ordinal, prefix)
+    : undefined
+}
 />
 <Splitter
 orientation="row"
@@ -356,6 +420,29 @@ sharedView && !ownerOnline
 }
 onChange={(e) => setDraft(e.target.value)}
 onKeyDown={(e) => {
+// 斜杠菜单持有键盘：↑↓ 选择、Enter/Tab 补全、Esc 关闭（不失焦）。
+if (slashOpen) {
+if (e.key === "ArrowDown") {
+e.preventDefault();
+setSlashIndex((i) => Math.min(i + 1, slashMatches.length - 1));
+return;
+}
+if (e.key === "ArrowUp") {
+e.preventDefault();
+setSlashIndex((i) => Math.max(i - 1, 0));
+return;
+}
+if (e.key === "Enter" || e.key === "Tab") {
+e.preventDefault();
+completeSlash(slashMatches[slashIdx]);
+return;
+}
+if (e.key === "Escape") {
+e.preventDefault();
+setSlashDismissedAt(draft);
+return;
+}
+}
 if (e.key === "Enter" && !e.shiftKey) {
 e.preventDefault();
 submit();
@@ -371,6 +458,24 @@ void addFiles(files);
 }
 }}
 />
+{slashOpen && (
+<div className="slash-menu" role="listbox" aria-label={t("chat.slashMenu")}>
+{slashMatches.map((it, i) => (
+<button
+key={`${it.kind}-${it.name}`}
+className={i === slashIdx ? "active" : ""}
+title={it.desc}
+onMouseDown={(e) => e.preventDefault()}
+onClick={() => completeSlash(it)}
+>
+<span className="slash-name">{it.kind === "mcp" ? "🔌" : "✦"} /{it.name}</span>
+<span className="slash-desc">
+{it.kind === "skill" && it.title !== it.name ? `${it.title} — ${it.desc}` : it.desc}
+</span>
+</button>
+))}
+</div>
+)}
 <input
 ref={fileInputRef}
 type="file"

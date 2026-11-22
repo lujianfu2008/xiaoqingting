@@ -1,6 +1,9 @@
-import type { AttachmentImage } from "@blm/protocol";
+import type { AttachmentImage, Block } from "@blm/protocol";
 import { Store, sharedWithUser, type SessionRecord } from "../store.js";
+import { listSkills } from "../skillsConfig.js";
+import { mergeMcpServers } from "../mcpConfig.js";
 import { AgentSession } from "./AgentSession.js";
+import { recallFromEngineTranscript } from "./engineTranscript.js";
 import type { ConnectionRegistry } from "./connections.js";
 import type { TaskManager } from "./taskManager.js";
 import type { UpdateRequestManager } from "./updateRequests.js";
@@ -91,6 +94,38 @@ export class MessageRouter {
     this.lastSpeaker.set(sessionId, userId);
   }
 
+  /**
+   * 斜杠呼叫：消息以 /name 开头时按**会话主人**的生效视图（全局+我的同名
+   * 覆盖）解析呼叫对象——专家技能优先，其次 MCP 服务器（enabled=false 的
+   * 不认）——把发给引擎的提示词改写为「先加载/优先使用该能力再办事」。
+   * 落库/回显/标题一律保持用户原文；名字不存在（或纯文本撞车）→ 原文
+   * 透传，不打扰普通输入。按主人查（而非发言人）：共享会话借用宿主的
+   * 能力——技能与 MCP 面本就只挂主人的。技能与 MCP 同名时技能优先。
+   */
+  private slashPromptFor(ownerUsername: string, text: string): string | null {
+    const m = /^\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,63})(?=\s|$)([\s\S]*)$/.exec(text);
+    if (!m) return null;
+    const ask = m[2].trim();
+    const askLine = ask ? `用户请求：\n${ask}` : "用户没有附加要求，直接开始。";
+    const skill = listSkills(ownerUsername).find((s) => s.name === m[1] && s.enabled !== false);
+    if (skill) {
+      return [
+        `用户通过 /${skill.name} 呼叫专家技能「${skill.title || skill.name}」。`,
+        `请先调用 Skill 工具加载技能 ${skill.name}，然后严格按该技能的指令处理。`,
+        askLine,
+      ].join("\n");
+    }
+    const mcp = mergeMcpServers(ownerUsername).servers[m[1]];
+    if (mcp && mcp.enabled !== false) {
+      return [
+        `用户通过 /${m[1]} 呼叫 MCP 服务器 ${m[1]}。`,
+        `请优先使用该服务器提供的工具（工具名形如 mcp__${m[1]}__*）完成请求。`,
+        askLine,
+      ].join("\n");
+    }
+    return null;
+  }
+
   /** Handle a user chat message over WS. Lazily (re)starts the session loop, resuming engine state. */
   handleUserMessage(userId: string, sessionId: string, text: string, clientMsgId?: string): void {
     const rec = this.checkAccess(userId, sessionId);
@@ -136,7 +171,10 @@ export class MessageRouter {
       block: userBlock,
     });
 
-    this.sessionOf(rec, sessionId).sendUserMessage(text);
+    // 斜杠呼叫专家：引擎提示词按技能改写（落库的 userBlock 仍是原文）。
+    this.sessionOf(rec, sessionId).sendUserMessage(
+      this.slashPromptFor(rec.user_id, text) ?? text,
+    );
   }
 
   /** 重新生成：对最后一条用户消息再跑一轮回复。 */
@@ -159,7 +197,8 @@ export class MessageRouter {
     // 记录驱动者（仅中断权）。
     this.recordSpeaker(rec, userId, sessionId);
     const session = this.sessionOf(rec, sessionId);
-    session.sendUserMessage(lastUser);
+    // 重新生成同样走斜杠改写：原文里的 /name 在引擎侧语义不变。
+    session.sendUserMessage(this.slashPromptFor(rec.user_id, lastUser) ?? lastUser);
   }
 
   /** 最后一条用户消息原文（剥离附件行）；还没有用户消息时为 null。 */
@@ -177,6 +216,111 @@ export class MessageRouter {
       return text.length > 0 ? text : null;
     }
     return null;
+  }
+
+  /**
+   * 撤回消息（任意位置回退）：删除第 ordinal 条用户消息**及其后所有
+   * 内容**——之后的回复都被它影响过，单删它留着被污染的回复没有意义。
+   * 两层同步裁剪：引擎转录（决定后续会话质量）+ 服务端聊天记录（用户
+   * 看到的）。撤回前先摘掉空闲的引擎会话循环（它可能还持有转录文件），
+   * 撤回后下一条消息按 engine_session_id resume 重建，撤回点之前的
+   * 上下文一点不丢。仅会话主人可撤回；回合进行中拒绝。
+   */
+  async handleRecallMessage(
+    userId: string,
+    sessionId: string,
+    ordinal: number,
+    prefix: string,
+  ): Promise<void> {
+    const rec = this.checkAccess(userId, sessionId);
+    if (!rec) return;
+    if (rec.user_id !== userId) {
+      this.conns.broadcast(userId, {
+        type: "error",
+        session_id: sessionId,
+        code: "recall_denied",
+        message: "只有会话主人可以撤回消息。",
+      });
+      return;
+    }
+    const live = this.sessions.get(sessionId);
+    if (live?.isBusy) {
+      this.conns.broadcast(userId, {
+        type: "error",
+        session_id: sessionId,
+        code: "recall_busy",
+        message: "回复进行中，等结束后再撤回。",
+      });
+      return;
+    }
+
+    const blocks = this.store.getHistory(sessionId);
+    const userTexts: { block: Block; index: number }[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i].kind === "user_text") userTexts.push({ block: blocks[i], index: i });
+    }
+    const target = userTexts[ordinal];
+    // 客户端列表可能已过期（别处刚发过消息）：前缀对不上就拒绝，
+    // 让客户端刷新后重试——绝不按序号盲删。
+    if (
+      !target ||
+      target.block.kind !== "user_text" ||
+      prefix.length === 0 ||
+      target.block.text.slice(0, prefix.length) !== prefix
+    ) {
+      this.conns.broadcast(userId, {
+        type: "error",
+        session_id: sessionId,
+        code: "recall_stale",
+        message: "会话内容已变化，请重新打开会话后再试。",
+      });
+      return;
+    }
+    const kept = blocks.slice(0, target.index);
+
+    // 摘掉空闲会话循环并等引擎进程死透：引擎退出时会回写整份转录，
+    // 不等死透就手术，裁掉的内容会被原样写回（见 disposeAsync）。
+    if (live) {
+      await live.disposeAsync();
+      this.sessions.delete(sessionId);
+    }
+
+    // 引擎转录手术：定位失败（如已被会话压缩折叠进摘要）时整个撤回
+    // 拒绝——宁可不做，不留「显示删了、引擎还记得」的半吊子状态。
+    if (rec.engine_session_id) {
+      const outcome = await recallFromEngineTranscript({
+        engineSessionId: rec.engine_session_id,
+        ordinal,
+        blockTexts: userTexts.slice(0, ordinal + 1).map((x) => (x.block as { text: string }).text),
+      });
+      if (outcome === "match_failed") {
+        this.conns.broadcast(userId, {
+          type: "error",
+          session_id: sessionId,
+          code: "recall_failed",
+          message: "无法在会话上下文中定位该消息（可能已被压缩折叠），暂不能撤回；可新开会话替代。",
+        });
+        return;
+      }
+      if (outcome === "reset" || outcome === "file_missing") {
+        // 转录已删/本就没有：引擎会话作废，下一条消息全新开始。
+        const fresh = this.store.getSession(sessionId);
+        if (fresh) {
+          fresh.engine_session_id = null;
+          this.store.saveSession(fresh);
+        }
+      }
+      // 文件级手术要有痕：落日志便于诊断（不含消息内容）。
+      console.log(`[recall] session=${sessionId} ordinal=${ordinal} transcript=${outcome}`);
+    }
+
+    this.store.setHistory(sessionId, kept);
+    // 全量补发给主人与共享可见用户：客户端整表替换本地缓存。
+    this.conns.broadcastShared(rec.user_id, sessionId, {
+      type: "history_truncated",
+      session_id: sessionId,
+      blocks: kept,
+    });
   }
 
   /** Lazily (re)start the session loop, resuming engine state. */

@@ -425,10 +425,25 @@ class RelayClient {
       }
       const msg = RelayServerMessage.safeParse(parsed);
       if (!msg.success) return; // 非法/未知帧一律丢弃
-      if (msg.data.type === "llm_request") this.handleRequest(msg.data);
-      else if (msg.data.type === "mcp_request") this.handleMcpRequest(msg.data);
-      // llm_cancel：服务端已放弃该响应（引擎侧中断），abort 本端请求。
-      else this.pending.get(msg.data.req_id)?.abort();
+      // 桥帧处理绝不让异常冒进 ws 接收管线（会把连接乃至主进程一起拖死）：
+      // 就地回错误帧收尾，连接保持。
+      try {
+        if (msg.data.type === "llm_request") this.handleRequest(msg.data);
+        else if (msg.data.type === "mcp_request") this.handleMcpRequest(msg.data);
+        // llm_cancel：服务端已放弃该响应（引擎侧中断），abort 本端请求并
+        // 释放槽位（abort 后不会再有回帧，留着就是泄漏）。
+        else {
+          this.pending.get(msg.data.req_id)?.abort();
+          this.pending.delete(msg.data.req_id);
+        }
+      } catch (err) {
+        console.error(`[relay] 桥帧处理异常 (${msg.data.type}):`, err);
+        this.send({
+          type: "llm_response_end",
+          req_id: msg.data.req_id,
+          error: "桌面端处理请求失败",
+        });
+      }
     });
     ws.on("close", (code) => {
       // 旧 socket 的迟到事件（reconfigure 已换新连接）——别动新连接的状态。
@@ -546,14 +561,29 @@ class RelayClient {
       return;
     }
     this.requestsTotal += 1;
+    // 注册配置摘要随帧下发：桌面日志里看得见自己在代连哪个注册项。
+    if (msg.server) {
+      console.info(
+        `[mcp] 代连注册服务器 ${msg.name}（${msg.server.type}${msg.server.url ? ` ${msg.server.url}` : ""}）`,
+      );
+    }
 
     // stdio：spawn 本机子进程走 JSON-RPC；http/sse：本机网络直接
     // 转发（127.0.0.1 由此才指向用户自己的机器——服务端连不到）。
     if (msg.spawn) {
+      // stdio 桥对 notification（无 JSON-RPC id，如引擎握手的
+      // notifications/initialized）会在本次调用内同步走完
+      // onHead/onData/onEnd——回调绝不能引用下方才赋值的 handle
+      // （TDZ ReferenceError 会把整条中继连接拖死，2026-11 everything
+      // 工具挂载失败即此因）；同步结算的请求也不进 pending，否则
+      // 槽位永久占住，攒满上限后整个 MCP 隧道拒绝服务。
+      let settled = false;
       const handle = handleStdioMcpRequest(
         {
           req_id: msg.req_id,
           name: msg.name,
+          method: msg.method,
+          conn: msg.conn,
           body: msg.body,
           spawn: msg.spawn,
         },
@@ -570,7 +600,9 @@ class RelayClient {
             this.send({ type: "llm_response_chunk", req_id: msg.req_id, data });
           },
           onEnd: (err) => {
-            if (this.pending.get(msg.req_id) === handle) this.pending.delete(msg.req_id);
+            settled = true;
+            // req_id 服务端随机生成、不复用，无需比对句柄身份。
+            this.pending.delete(msg.req_id);
             if (err) this.requestsFailed += 1;
             this.send({
               type: "llm_response_end",
@@ -580,7 +612,7 @@ class RelayClient {
           },
         },
       );
-      this.pending.set(msg.req_id, handle);
+      if (!settled) this.pending.set(msg.req_id, handle);
       return;
     }
 

@@ -43,6 +43,9 @@ interface ChatMessagesProps {
   busy?: boolean;
   /** 重新生成回调（最后一条助手回复的按钮触发）。 */
   onRegenerate?: () => void;
+  /** 撤回回调（用户消息 hover 出现；仅主人视图传入）。参数 = 该消息在
+   *  会话用户消息里的序号 + 文本前缀（服务端防错位校验用）。 */
+  onRecall?: (ordinal: number, prefix: string) => void;
 }
 
 export function ChatMessages({
@@ -56,6 +59,7 @@ export function ChatMessages({
   bottomRef,
   busy,
   onRegenerate,
+  onRecall,
 }: ChatMessagesProps): React.JSX.Element {
   const t = useT();
   // 任务清单已结构化渲染：TodoWrite 的配对 tool_result（迟到一个消息）按
@@ -108,6 +112,29 @@ export function ChatMessages({
     return -1;
   }, [tail]);
 
+  // 撤回定位：每条 user_text 在会话用户消息里的序号（按 visible 算——
+  // 任务清单隐藏只滤工具块，user_text 的序号与全量数组一致）。
+  // 连带删除的条数 = 它到自己（含）之后可见块的结尾。
+  const recallOrdinals = useMemo(() => {
+    const ord: number[] = [];
+    let n = 0;
+    for (let i = 0; i < visible.length; i++) {
+      if (visible[i].kind === "user_text") {
+        ord[i] = n++;
+      }
+    }
+    return ord;
+  }, [visible]);
+  const recallAt = (visibleIdx: number) => {
+    const ordinal = recallOrdinals[visibleIdx];
+    const b = visible[visibleIdx];
+    if (!onRecall || b.kind !== "user_text" || ordinal === undefined) return;
+    const removed = visible.length - visibleIdx;
+    if (window.confirm(t("chat.recallConfirm", { n: removed }))) {
+      onRecall(ordinal, b.text.slice(0, 60));
+    }
+  };
+
   return (
     <div className="chat">
       {blocks.length === 0 && !streamingText && (
@@ -154,7 +181,12 @@ export function ChatMessages({
         </button>
       )}
       {head.map((b, i) => (
-        <MessageBlock key={`h${i}`} block={b} />
+        <MessageBlock
+          key={`h${i}`}
+          block={b}
+          onRecall={onRecall ? () => recallAt(i) : undefined}
+          recallDisabled={busy === true}
+        />
       ))}
       {/* 尾部片段首块的锚点：点 history 展开时视口滚到这里。 */}
       <div ref={tailStartRef} style={{ height: 0 }} />
@@ -165,6 +197,8 @@ export function ChatMessages({
           showRegenerate={Boolean(onRegenerate) && i === lastAgentText}
           regenDisabled={busy === true}
           onRegenerate={onRegenerate}
+          onRecall={onRecall ? () => recallAt(cut + i) : undefined}
+          recallDisabled={busy === true}
         />
       ))}
       {streamingText && <StreamingMessage text={streamingText} />}

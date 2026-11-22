@@ -25,6 +25,18 @@ export const WsRegenerate = z.object({
   session_id: z.string(),
 });
 
+// 撤回消息（任意位置回退）：删除第 ordinal 条用户消息**及其后所有内容**
+// （之后的回复都受它影响，单删它没有意义）。两层同步裁剪：服务端聊天
+// 记录 + 引擎转录（引擎 resume 时按转录重建上下文，只删聊天记录治标
+// 不治本）。prefix 是目标块文本前缀，防客户端列表过期时点错条目。
+// 仅会话主人可撤回；回合进行中拒绝。
+export const WsRecallMessage = z.object({
+  type: z.literal("recall_message"),
+  session_id: z.string(),
+  ordinal: z.number().int().min(0),
+  prefix: z.string(),
+});
+
 export const WsPermissionResponse = z.object({
   type: z.literal("permission_response"),
   request_id: z.string(),
@@ -60,6 +72,7 @@ export const ClientMessage = z.discriminatedUnion("type", [
   WsUserMessage,
   WsInterrupt,
   WsRegenerate,
+  WsRecallMessage,
   WsPermissionResponse,
   WsToolExecResult,
   WsDiagResult,

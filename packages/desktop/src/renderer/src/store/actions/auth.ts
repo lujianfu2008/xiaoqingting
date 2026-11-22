@@ -90,6 +90,8 @@ export function createAuthActions(
         employeeId: data.employee_id,
         role: data.role,
         error: null,
+        errorCode: null,
+        errorSession: null,
         localLock: null,
         registeredPending: null,
         authNotice: null,
@@ -121,7 +123,14 @@ export function createAuthActions(
       const data = (await res.json()) as RegisterResponseData;
       // 新注册账号进入待审核：不签发登录态，显示等待审核页。
       if (data.status !== "approved") {
-        set({ registeredPending: username, authNotice: null, error: null, localLock: null });
+        set({
+          registeredPending: username,
+          authNotice: null,
+          error: null,
+          errorCode: null,
+          errorSession: null,
+          localLock: null,
+        });
         return;
       }
       saveIdentity(serverUrl, data.token ?? "", data.username, data.employee_id, "user");
@@ -132,6 +141,8 @@ export function createAuthActions(
         employeeId: data.employee_id,
         role: "user",
         error: null,
+        errorCode: null,
+        errorSession: null,
         localLock: null,
         registeredPending: null,
         authNotice: null,

@@ -69,6 +69,29 @@ export function relayIngressPort(): number | null {
   return ingressPort;
 }
 
+// /g 路由的进程内口令：仅供本进程内的适配层（openaiCompat）构造借网 URL，
+// 引擎与外部进程都拿不到——没有它，入口里「显式指定目标 base」的通道就是
+// 一只隐形的出网代理。
+const borrowSecret = crypto.randomBytes(16).toString("base64url");
+
+/**
+ * 适配层借网 URL（显式目标版）：与引擎直连的 /u 路由不同，/g 允许逐请求指定
+ * 真实目标 base——多配置自动切换时每个候选的网关地址不同，不能只认主人配置。
+ * owner/session 仅用于挑代发桌面与日志口径；返回 null = 不借（中继关/无人
+ * opt-in/入口未就绪），调用方自行直连。
+ */
+export function relayBorrowUrlFor(
+  owner: string,
+  sessionId: string | null,
+  targetBase: string,
+): string | null {
+  const base = targetBase.trim().replace(/\/+$/, "");
+  if (!base.startsWith("http://") && !base.startsWith("https://")) return null;
+  if (ingressPort == null || !relayEligible(owner, sessionId)) return null;
+  const sid = sessionId ? `/s/${encodeURIComponent(sessionId)}` : "";
+  return `http://127.0.0.1:${ingressPort}/g/${borrowSecret}/${encodeURIComponent(owner)}${sid}/${Buffer.from(base).toString("base64url")}`;
+}
+
 /** 候选代发人：当前负责人优先，其次会话主人（去重）。 */
 function proxyCandidates(owner: string, sessionId?: string | null): string[] {
   const exec = sessionId ? (proxyResolver?.(sessionId) ?? null) : null;
@@ -103,7 +126,7 @@ export function relayIngressFor(owner: string, sessionId?: string | null): strin
   return `http://127.0.0.1:${ingressPort}/u/${encodeURIComponent(owner)}${sid}`;
 }
 
-/** 引擎请求的真实目标（与 sessionOptions 的 env 逻辑同源）：主人个人 base_url ‖ 全局 env ‖ 官方默认。 */
+/** 引擎请求的真实目标（与 sessionOptions 的 env 逻辑同源）：主人当前生效配置的 base_url ‖ 全局 env ‖ 官方默认。 */
 function resolveBaseUrl(owner: string): string {
   const personal = getUserLlmConfig(owner)?.base_url?.trim();
   return (
@@ -160,14 +183,43 @@ async function handleIngressRequest(req: IncomingMessage, res: ServerResponse): 
   const path = q >= 0 ? raw.slice(0, q) : raw;
   const query = q >= 0 ? raw.slice(q) : "";
 
-  const m = /^\/u\/([^/]+)(?:\/s\/([^/]+))?(\/.*)?$/.exec(path);
-  if (!m) {
+  // /u/<owner>[/s/<session>]/<路径>：引擎直连入口，目标取主人当前配置。
+  // /g/<口令>/<owner>[/s/<session>]/<b64url 目标>/<路径>：适配层借网专用，
+  // 目标由调用方逐请求给定（多配置切换各自网关）。
+  const um = /^\/u\/([^/]+)(?:\/s\/([^/]+))?(\/.*)?$/.exec(path);
+  const gm = um ? null : /^\/g\/([^/]+)\/([^/]+)(?:\/s\/([^/]+))?\/([^/]+)(\/.*)?$/.exec(path);
+  if (!um && !gm) {
     failJson(res, 404, "中继路径不合法");
     return;
   }
-  const owner = decodeURIComponent(m[1]);
-  const sessionId = m[2] ? decodeURIComponent(m[2]) : undefined;
-  const enginePath = (m[3] ?? "/") + query;
+  let owner: string;
+  let sessionId: string | undefined;
+  let enginePath: string;
+  let targetBase: string;
+  if (um) {
+    owner = decodeURIComponent(um[1]);
+    sessionId = um[2] ? decodeURIComponent(um[2]) : undefined;
+    enginePath = (um[3] ?? "/") + query;
+    targetBase = resolveBaseUrl(owner);
+  } else {
+    if (gm![1] !== borrowSecret) {
+      failJson(res, 404, "中继路径不合法");
+      return;
+    }
+    owner = decodeURIComponent(gm![2]);
+    sessionId = gm![3] ? decodeURIComponent(gm![3]) : undefined;
+    enginePath = (gm![5] ?? "/") + query;
+    try {
+      targetBase = Buffer.from(gm![4], "base64url").toString("utf8").replace(/\/+$/, "");
+    } catch {
+      failJson(res, 400, "目标地址不合法");
+      return;
+    }
+    if (!targetBase.startsWith("http://") && !targetBase.startsWith("https://")) {
+      failJson(res, 400, "目标地址不合法");
+      return;
+    }
+  }
 
   // SDK 对引擎 base 做探活（HEAD <base>/api/hello）：直接答 200——探活不代表
   // 有桌面可借，不该因代发人离线把引擎启动卡在 503 上。
@@ -200,7 +252,7 @@ async function handleIngressRequest(req: IncomingMessage, res: ServerResponse): 
     if (relayEligible(owner, sessionId)) {
       // 桌面端全部离线：退回服务端直连（尽力而为；被 WAF 拦的网关会报错，
       // 与「中继未曾可用」同源，不再凭空造 503）。
-      await passThroughDirect(req, res, owner, enginePath, body);
+      await passThroughDirect(req, res, owner, enginePath, body, targetBase);
       return;
     }
     relayRegistry.recordFailure(owner, req.url ?? "-", "桌面端不在线");
@@ -212,7 +264,7 @@ async function handleIngressRequest(req: IncomingMessage, res: ServerResponse): 
     return;
   }
 
-  const target = resolveBaseUrl(owner) + enginePath;
+  const target = targetBase + enginePath;
   let host = "";
   try {
     host = new URL(target).host;
@@ -249,7 +301,7 @@ async function handleIngressRequest(req: IncomingMessage, res: ServerResponse): 
       `[relay] ${owner} ← 代发 ${proxy} 60s 无回帧 (${host})——改服务端直连接管`,
     );
     relayRegistry.sendTo(proxy, { type: "llm_cancel", req_id: reqId });
-    void passThroughDirectBody(req, res, owner, enginePath, body);
+    void passThroughDirectBody(req, res, owner, enginePath, body, targetBase);
   };
   entry.idleTimer = setTimeout(() => entry.takeover?.(), PROXY_FIRST_BYTE_TIMEOUT_MS);
 
@@ -294,8 +346,9 @@ async function passThroughDirect(
   owner: string,
   enginePath: string,
   body: string,
+  targetBase = resolveBaseUrl(owner),
 ): Promise<void> {
-  const target = resolveBaseUrl(owner) + enginePath;
+  const target = targetBase + enginePath;
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (STRIP_HEADERS.has(k)) continue;

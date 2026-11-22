@@ -1,19 +1,28 @@
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { getUserLlmConfig } from "./llmConfig.js";
-import { relayProxyFor, relayIngressPort } from "./relay/llmBridge.js";
+import {
+  getEnabledLlmProfiles,
+  getUserLlmSettings,
+  type ResolvedProfile,
+} from "./llmConfig.js";
+import { relayBorrowUrlFor } from "./relay/llmBridge.js";
 
-// OpenAI 协议适配层：把引擎的 Anthropic Messages 请求翻译成
-// OpenAI chat/completions（国内网关大多只说 OpenAI 协议）。
+// 个人大模型适配层：引擎的个人配置流量统一过本端口，对引擎而言这是标准的
+// Anthropic 端点（流式回 Anthropic SSE，非流式回 Anthropic message JSON，
+// 错误回 Anthropic error JSON）。两条路线按「当前生效配置」的协议选择：
 //
-// 链路：引擎 → 本翻译端口 /t/<user>/s/<session>/v1/messages → (共享中继入口 ‖
-// 直连) → 上游网关。鉴权在服务端注入（存储的个人 key），引擎带来的认证头一律
-// 忽略。session 只用于解析「当前负责人」：很多网关（如联通 AIGW）拦数据中心
-// IP 的 POST，只有用户桌面网络可达——负责人桌面可用就先借它，其次主人的；
-// 都不可用（中继没开、无人 opt-in 或桌面全离线）则服务端直连。
+//   /a/<user>[/s/<session>]/<原路径>   Anthropic 协议：请求原样透传（改写模型）
+//   /t/<user>[/s/<session>]/v1/messages  OpenAI 协议：翻译成 chat/completions
 //
-// 对引擎而言这是一个标准的 Anthropic 端点：流式回 Anthropic SSE 事件序列，
-// 非流式回 Anthropic message JSON，错误回 Anthropic error JSON。
+// 多配置择优（超时/重试/自动切换都在这层实现）：候选 = 按优先级排序的启用
+// 配置（自动模型选择关掉时只取第一条）。每个候选先按 settings.retries 重试
+// 可重试失败（超时/网络错误/5xx/429），仍不行就自动切换下一个候选；鉴权类
+// 错误（401/403/400/404）不耗重试直接换下一家。流式响应一旦开始吐字就不再
+// 切换（只按空闲超时收尾报错）。
+//
+// 上游出网优先借中继入口（/g 显式目标路由，每个候选网关地址不同），无人可借
+// 时服务端直连。鉴权在服务端按候选注入（存储的个人 key），引擎带来的认证头
+// 一律忽略——切到别的配置时引擎那把 key 不再对应真实目标。
 
 // ---------- 类型（结构化最小集，不引 SDK） ----------
 
@@ -426,38 +435,275 @@ async function readBody(req: IncomingMessage, maxBytes: number): Promise<string>
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** 上游地址：借用在线桌面（当前负责人优先、会话主人兜底）转发；没有桌面可借
- *  时若本可借网则服务端直连（尽力而为），否则返回 null 让调用方报配置错误。
- *  ≥1 台桌面在线时必须借——桌面离线时要直连（2026-11-02 的坑：桥端口常年
- *  监听，但桌面离线时桥回 503，不先判在线等于把可直连的网关永久打成不可用）。 */
+// ---------- 上游出网与候选择优 ----------
+
+/** 可重试的失败：超时（fetch 抛错）/网络抖动/服务端过载。 */
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
+
+/** 候选列表：按优先级的启用配置；自动模型选择关闭时只取第一条。 */
+function candidateList(username: string): ResolvedProfile[] {
+  const enabled = getEnabledLlmProfiles(username);
+  if (enabled.length === 0) return [];
+  return getUserLlmSettings(username).auto_select ? enabled : enabled.slice(0, 1);
+}
+
+/** 上游地址：优先借中继入口（/g 显式目标路由——每个候选网关地址不同），
+ *  无人可借（中继关/无人 opt-in/桌面全离线）则服务端直连。≥1 台桌面在线时
+ *  必须借——桌面离线时要直连（2026-11-02 的坑：桥端口常年监听，但桌面离线
+ *  时桥回 503，不先判在线等于把可直连的网关永久打成不可用）。 */
 function upstreamFor(
   username: string,
   sessionId: string | null,
-  cfg: { base_url?: string },
-): { url: string; viaRelay: boolean; proxy?: string } | null {
-  const ingress = relayIngressPort();
-  const proxy = ingress != null ? relayProxyFor(username, sessionId) : null;
-  if (proxy && ingress != null) {
-    return {
-      url: `http://127.0.0.1:${ingress}/u/${encodeURIComponent(username)}${sessionId ? `/s/${encodeURIComponent(sessionId)}` : ""}/chat/completions`,
-      viaRelay: true,
-      proxy,
-    };
-  }
-  const base = cfg.base_url?.replace(/\/+$/, "");
+  profile: ResolvedProfile,
+  enginePath: string,
+): { url: string; viaRelay: boolean } | null {
+  let base = profile.base_url?.trim().replace(/\/+$/, "") ?? "";
+  if (!base && profile.protocol !== "openai") base = "https://api.anthropic.com";
   if (!base) return null;
-  return { url: `${base}/chat/completions`, viaRelay: false };
+  const borrow = relayBorrowUrlFor(username, sessionId, base);
+  if (borrow) return { url: `${borrow}${enginePath}`, viaRelay: true };
+  return { url: `${base}${enginePath}`, viaRelay: false };
 }
 
-async function handleMessages(
+/** 按候选注入请求头：认证一律服务端说了算，引擎带来的认证头忽略。 */
+function authHeadersFor(
+  profile: ResolvedProfile,
+  incoming: IncomingMessage["headers"],
+): Record<string, string> {
+  const h: Record<string, string> = { "content-type": "application/json" };
+  if (typeof incoming.accept === "string") h.accept = incoming.accept;
+  if (profile.protocol === "openai") {
+    if (profile.api_key) h.authorization = `Bearer ${profile.api_key}`;
+  } else {
+    h["x-api-key"] = profile.api_key ?? "";
+    h["anthropic-version"] =
+      typeof incoming["anthropic-version"] === "string"
+        ? incoming["anthropic-version"]
+        : "2023-06-01";
+    if (typeof incoming["anthropic-beta"] === "string") {
+      h["anthropic-beta"] = incoming["anthropic-beta"];
+    }
+  }
+  return h;
+}
+
+interface CandidateFailure {
+  kind: "fail";
+  retryable: boolean;
+  /** 0 = 网络/超时类失败（无 HTTP 状态）。 */
+  status: number;
+  message: string;
+}
+interface CandidateSuccess {
+  kind: "ok";
+  res: Response;
+  /** 空闲看门狗：流式阶段每收到一片续期；abort 即「上游停摆/网络断」。 */
+  idle: AbortController;
+}
+type CandidateOutcome =
+  | CandidateSuccess
+  | CandidateFailure
+  | { kind: "aborted" }; // 引擎侧断开（用户点停止）——整链放弃
+
+/**
+ * 构造单次尝试的 opener。bodies 可给两个变体（带/不带 stream_options）：
+ * 个别网关不认 stream_options，400/422 时用第二个变体立即补一发（不耗重试
+ * 次数）。超时语义：等响应头最多 timeout_ms；信号同时挂在 fetch 上，响应
+ * 阶段由 commit 的空闲看门狗续期，不会把长流一刀切。
+ */
+function makeAttempt(
+  upstreamUrl: string,
+  headers: Record<string, string>,
+  bodies: string[],
+  upstreamAbort: AbortController,
+  timeoutMs: number,
+): () => Promise<CandidateOutcome> {
+  return async () => {
+    const idle = new AbortController();
+    const arm = (): NodeJS.Timeout =>
+      setTimeout(
+        () => idle.abort(new Error(`上游 ${timeoutMs / 1000} 秒无响应`)),
+        timeoutMs,
+      );
+    let timer = arm();
+    let body = bodies[0];
+    let altTried = false;
+    try {
+      for (;;) {
+        const res = await fetch(upstreamUrl, {
+          method: "POST",
+          headers,
+          body,
+          signal: AbortSignal.any([upstreamAbort.signal, idle.signal]),
+        });
+        if (res.ok) {
+          clearTimeout(timer);
+          return { kind: "ok", res, idle };
+        }
+        if (
+          !altTried &&
+          bodies.length > 1 &&
+          (res.status === 400 || res.status === 422)
+        ) {
+          // 换无 stream_options 变体立即重试一次
+          altTried = true;
+          body = bodies[1];
+          clearTimeout(timer);
+          timer = arm();
+          void res.text().catch(() => {});
+          continue;
+        }
+        const text = await res.text().catch(() => "");
+        clearTimeout(timer);
+        return {
+          kind: "fail",
+          retryable: RETRYABLE_STATUS.has(res.status),
+          status: res.status,
+          message: text.slice(0, 500) || `上游返回 ${res.status}`,
+        };
+      }
+    } catch (err) {
+      clearTimeout(timer);
+      if (upstreamAbort.signal.aborted) return { kind: "aborted" };
+      return {
+        kind: "fail",
+        retryable: true,
+        status: 0,
+        message: (err as Error).message || "上游请求失败",
+      };
+    }
+  };
+}
+
+/** 单候选完整尝试：retries+1 次，可重试失败耗尽后返回最后一次失败。 */
+async function runForCandidate(
+  attempt: () => Promise<CandidateOutcome>,
+  retries: number,
+  label: string,
+): Promise<CandidateOutcome> {
+  let last: CandidateFailure = {
+    kind: "fail",
+    retryable: false,
+    status: 0,
+    message: "未尝试",
+  };
+  for (let i = 0; i <= retries; i++) {
+    const out = await attempt();
+    if (out.kind !== "fail") return out;
+    last = out;
+    console.warn(
+      `[llm] ${label} 第 ${i + 1}/${retries + 1} 次尝试失败：${out.status || "网络/超时"} ${out.message.slice(0, 200)}`,
+    );
+    if (!out.retryable) break;
+  }
+  return last;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * 交付已成功的上游响应给引擎（commit 起不再切换候选）。流式阶段用空闲看门狗
+ * ——停摆超过 timeout_ms 就断开收尾；非流式同限内读完。
+ */
+async function commitResponse(
+  success: CandidateSuccess,
+  res: ServerResponse,
+  opts: { translate: boolean; model: string; stream: boolean; timeoutMs: number; label: string },
+): Promise<void> {
+  const { res: upstreamRes, idle } = success;
+  let idleTimer: NodeJS.Timeout | null = null;
+  const armIdle = (): void => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idle.abort(new Error(`流空闲超时（${opts.timeoutMs / 1000} 秒无数据）`));
+    }, opts.timeoutMs);
+    idleTimer.unref();
+  };
+  armIdle();
+  const stopIdle = (): void => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
+  const decoder = new TextDecoder("utf-8");
+
+  if (!opts.stream) {
+    // 非流式：一次性读体（超时由 idle 看门狗兜底）
+    try {
+      if (opts.translate) {
+        const data = (await upstreamRes.json()) as OpenAiResponse;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(openAiResponseToAnthropic(data, opts.model)));
+      } else {
+        const text = await upstreamRes.text();
+        res.writeHead(200, {
+          "content-type": upstreamRes.headers.get("content-type") ?? "application/json",
+        });
+        res.end(text);
+      }
+    } catch (err) {
+      stopIdle();
+      if (res.destroyed) return; // 引擎侧已断开（点停止），静默收尾
+      sse(res, 502, "api_error", `读取上游响应失败：${(err as Error).message}`);
+    }
+    stopIdle();
+    return;
+  }
+
+  // 流式：SSE → 引擎（translate 路线经翻译器；透传路线原样转发）
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+  const translator = opts.translate ? new OpenAiStreamTranslator(opts.model) : null;
+  try {
+    for await (const c of upstreamRes.body ?? []) {
+      armIdle(); // 每片续期
+      const chunk = decoder.decode(c as Buffer, { stream: true });
+      const out = translator ? translator.push(chunk) : chunk;
+      if (out) res.write(out);
+    }
+    const tail = translator
+      ? translator.push(decoder.decode()) + translator.end()
+      : decoder.decode();
+    res.write(tail);
+  } catch (err) {
+    // 流中断/空闲停摆：按 Anthropic error 事件收尾（引擎按 API 错误处理）。
+    stopIdle();
+    console.warn(`[llm] ${opts.label} 流中断：${(err as Error).message}`);
+    const pre = translator ? translator.end() : "";
+    res.write(
+      pre +
+        `event: error\ndata: ${JSON.stringify({
+          type: "error",
+          error: { type: "api_error", message: `流中断：${(err as Error).message}` },
+        })}\n\n`,
+    );
+  }
+  stopIdle();
+  res.end();
+}
+
+/**
+ * 个人配置请求统一处置：按候选择优（超时→重试→自动切换）。候选若是 OpenAI
+ * 协议则翻译成 chat/completions（上游路径 /chat/completions），Anthropic
+ * 协议则透传（上游路径 = 引擎原始路径）——引擎侧输出格式始终是 Anthropic，
+ * 跨协议切换对引擎透明。
+ */
+async function handleEngineRequest(
   username: string,
   sessionId: string | null,
   req: IncomingMessage,
   res: ServerResponse,
+  opts: { anthropicPath: string; translate: boolean },
 ): Promise<void> {
-  const cfg = getUserLlmConfig(username);
-  if (!cfg?.api_key) {
-    sse(res, 401, "authentication_error", "未配置个人 LLM Key（OpenAI 协议需要）。");
+  const candidates = candidateList(username);
+  if (candidates.length === 0) {
+    sse(res, 401, "authentication_error", "未配置个人大模型，请先在设置「我的大模型」里添加并启用一条配置。");
     return;
   }
   const raw = await readBody(req, 32 * 1024 * 1024);
@@ -468,99 +714,91 @@ async function handleMessages(
     sse(res, 400, "invalid_request_error", "请求体不是合法 JSON。");
     return;
   }
-  // 模型优先用个人配置里的（与 sessionOptions 的解析一致）。
-  const model = cfg.model?.trim() || body.model || "";
-  if (!model) {
-    sse(res, 400, "invalid_request_error", "缺少模型名。");
-    return;
-  }
-  const upstream = upstreamFor(username, sessionId, cfg);
-  if (!upstream) {
-    sse(res, 400, "invalid_request_error", "OpenAI 协议需要在 LLM 设置里填写 base_url。");
-    return;
-  }
-  console.info(
-    `[llm] ${username} model=${model} → ${upstream.viaRelay ? `中继桥(代发 ${upstream.proxy})` : "直连"} ${upstream.url}`,
-  );
-
-  const oaiBody = anthropicToOpenAiRequest(body, model);
-  // 引擎侧断开（点停止）→ 连带 abort 上游；10 分钟兜底超时。
+  const settings = getUserLlmSettings(username);
+  // 引擎侧断开（点停止）→ 连带 abort 上游整链。
   const upstreamAbort = new AbortController();
   res.on("close", () => upstreamAbort.abort());
-  const doFetch = (withUsageOption: boolean): Promise<Response> =>
-    fetch(upstream.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${cfg.api_key}`,
-      },
-      body: JSON.stringify(
-        withUsageOption && oaiBody.stream
-          ? { ...oaiBody, stream_options: { include_usage: true } }
-          : oaiBody,
-      ),
-      signal: AbortSignal.any([upstreamAbort.signal, AbortSignal.timeout(600_000)]),
-    });
 
-  let upstreamRes: Response;
-  try {
-    upstreamRes = await doFetch(true);
-    // 个别网关不认 stream_options：去掉重试一次。
-    if (!upstreamRes.ok && (upstreamRes.status === 400 || upstreamRes.status === 422)) {
-      upstreamRes = await doFetch(false);
+  let lastFail: CandidateFailure | null = null;
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const profile = candidates[ci];
+    const skip = (message: string): void => {
+      lastFail = { kind: "fail", retryable: false, status: 400, message };
+      console.warn(`[llm] 候选「${profile.name}」跳过：${message}`);
+    };
+    const model = profile.model?.trim() || body.model || "";
+    if (!model) {
+      skip("未填模型名");
+      continue;
     }
-  } catch (err) {
-    sse(res, 502, "api_error", `上游请求失败：${(err as Error).message} (${upstream.url})`);
-    return;
-  }
-  if (!upstreamRes.ok) {
-    const text = await upstreamRes.text().catch(() => "");
-    console.warn(`[llm] 上游 ${upstreamRes.status} ← ${upstream.url} | ${text.slice(0, 300)}`);
-    sse(
-      res,
-      upstreamRes.status,
-      errorTypeForStatus(upstreamRes.status),
-      text.slice(0, 500) || `上游返回 ${upstreamRes.status}`,
+    if (!profile.api_key) {
+      skip("未填 API Key");
+      continue;
+    }
+    const translate = profile.protocol === "openai";
+    const upstreamPath = translate ? "/chat/completions" : opts.anthropicPath;
+    const upstream = upstreamFor(username, sessionId, profile, upstreamPath);
+    if (!upstream) {
+      skip("OpenAI 协议需要在配置里填写 base_url");
+      continue;
+    }
+    const label = `候选 ${ci + 1}/${candidates.length}「${profile.name}」`;
+    console.info(
+      `[llm] ${username} model=${model} → ${label}(${translate ? "openai" : "anthropic"}) ` +
+        `${upstream.viaRelay ? "中继桥代发" : "直连"} ${hostOf(upstream.url)}${upstreamPath.split("?")[0]}`,
     );
-    return;
-  }
 
-  if (!body.stream) {
-    let data: OpenAiResponse;
-    try {
-      data = (await upstreamRes.json()) as OpenAiResponse;
-    } catch {
-      sse(res, 502, "api_error", "上游响应不是合法 JSON。");
+    // 请求体按候选准备：模型改写 + 协议翻译。流式请求备两个变体（带/不带
+    // stream_options）；非流式只有一个形态。
+    const effective = model !== body.model ? { ...body, model } : body;
+    const openaiBody = translate ? anthropicToOpenAiRequest(effective, model) : null;
+    const bodies = openaiBody
+      ? openaiBody.stream
+        ? [
+            JSON.stringify({ ...openaiBody, stream_options: { include_usage: true } }),
+            JSON.stringify(openaiBody),
+          ]
+        : [JSON.stringify(openaiBody)]
+      : [JSON.stringify(effective)];
+
+    const attempt = makeAttempt(
+      upstream.url,
+      authHeadersFor(profile, req.headers),
+      bodies,
+      upstreamAbort,
+      settings.timeout_ms,
+    );
+    const outcome = await runForCandidate(attempt, settings.retries, label);
+    if (outcome.kind === "aborted") {
+      res.destroy();
       return;
     }
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(openAiResponseToAnthropic(data, model)));
-    return;
+    if (outcome.kind === "ok") {
+      await commitResponse(outcome, res, {
+        translate,
+        model,
+        stream: body.stream === true,
+        timeoutMs: settings.timeout_ms,
+        label,
+      });
+      return;
+    }
+    lastFail = outcome;
+    if (ci < candidates.length - 1) {
+      console.warn(
+        `[llm] ${label} 失败（${outcome.status || "网络/超时"}）→ 自动切换下一个配置`,
+      );
+    }
   }
 
-  // 流式：SSE → SSE
-  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-  const translator = new OpenAiStreamTranslator(model);
-  const decoder = new TextDecoder("utf-8");
-  try {
-    for await (const c of upstreamRes.body ?? []) {
-      const out = translator.push(decoder.decode(c as Buffer, { stream: true }));
-      if (out) res.write(out);
-    }
-    const tail = translator.push(decoder.decode());
-    res.write(tail + translator.end());
-  } catch (err) {
-    // 流中断：按 Anthropic error 事件收尾（引擎按 API 错误处理）。
-    const out =
-      translator.end() +
-      `event: error\ndata: ${JSON.stringify({
-        type: "error",
-        error: { type: "api_error", message: `流中断：${(err as Error).message}` },
-      })}\n\n`;
-    res.write(out);
-  } finally {
-    res.end();
-  }
+  const f = lastFail ?? { kind: "fail" as const, retryable: false, status: 502, message: "无可用配置" };
+  const status = f.status || 502;
+  sse(
+    res,
+    status,
+    errorTypeForStatus(status),
+    `所有已启用的大模型配置均失败（最后错误：${f.message}）`,
+  );
 }
 
 /** 启动共享翻译端口（一次即可，按路径前缀 /t/<user> 路由到对应用户配置）。 */
@@ -580,42 +818,58 @@ export function startOpenAiCompatServer(): Promise<void> {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       compatPort = (server.address() as { port: number }).port;
-      console.info(`[llm] OpenAI 协议适配层已就绪 port=${compatPort}`);
+      console.info(`[llm] 个人大模型适配层已就绪 port=${compatPort}`);
       resolve();
     });
   });
 }
 
 async function handleCompatRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // 只回答 POST /t/<user>[/s/<session>]/v1/messages[/count_tokens]，其余一律
-  // Anthropic 404。引擎 CLI 实际请求带查询参数（v1/messages?beta=true）
-  // ——路由前必须剥掉。session 可缺省（老会话的 base_url 没有它）：
-  // 缺省时代发人解析退化为「只用会话主人」。
-  const path = (req.url ?? "").split("?")[0];
+  // 只回答两条前缀，其余一律 Anthropic 404。引擎 CLI 实际请求带查询参数
+  // （v1/messages?beta=true）——路由前必须剥掉再透传回去。session 可缺省
+  // （老会话的 base_url 没有它）：缺省时负责人解析退化为「只用会话主人」。
+  const rawUrl = req.url ?? "";
+  const q = rawUrl.indexOf("?");
+  const path = q >= 0 ? rawUrl.slice(0, q) : rawUrl;
+  const query = q >= 0 ? rawUrl.slice(q) : "";
   // SDK 对引擎 base 做探活（HEAD <base>/api/hello）：翻译层是常驻端口，直接答 200。
   if (req.method === "HEAD" && path.endsWith("/api/hello")) {
     res.writeHead(200);
     res.end();
     return;
   }
-  const m = /^\/t\/([^/]+)(?:\/s\/([^/]+))?\/v1\/messages(\/count_tokens)?$/.exec(path);
-  if (req.method !== "POST" || !m) {
-    console.warn(`[llm] 翻译层 404: ${req.method} ${req.url ?? ""}`);
+  if (req.method !== "POST") {
+    console.warn(`[llm] 适配层 404: ${req.method} ${rawUrl}`);
     sse(res, 404, "not_found_error", "未知端点。");
     return;
   }
-  const username = decodeURIComponent(m[1]);
-  const sessionId = m[2] ? decodeURIComponent(m[2]) : null;
-  if (m[3]) {
-    // count_tokens：引擎拿它做上下文估算，给个保守近似即可。
-    const raw = await readBody(req, 8 * 1024 * 1024).catch(() => "");
-    const chars = raw.length;
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ input_tokens: Math.ceil(chars / 3) }));
+  const tm = /^\/t\/([^/]+)(?:\/s\/([^/]+))?\/v1\/messages(\/count_tokens)?$/.exec(path);
+  if (tm) {
+    const username = decodeURIComponent(tm[1]);
+    const sessionId = tm[2] ? decodeURIComponent(tm[2]) : null;
+    if (tm[3]) {
+      // count_tokens：OpenAI 网关没有这个端点，本地按字符数给保守近似即可。
+      const raw = await readBody(req, 8 * 1024 * 1024).catch(() => "");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ input_tokens: Math.ceil(raw.length / 3) }));
+      return;
+    }
+    await handleEngineRequest(username, sessionId, req, res, {
+      anthropicPath: "/v1/messages" + query,
+      translate: true,
+    });
     return;
   }
-  // 客户端（引擎）断开 → 连带放弃上游请求由 fetch 的 signal 链路处理：
-  // 翻译层没有独立的 abort 通道，流式循环随 res 关闭自然终止；借道中继时
-  // 桥的 res close 会把 llm_cancel 转发给代发桌面。
-  await handleMessages(username, sessionId, req, res);
+  const am = /^\/a\/([^/]+)(?:\/s\/([^/]+))?(\/.+)$/.exec(path);
+  if (am) {
+    const username = decodeURIComponent(am[1]);
+    const sessionId = am[2] ? decodeURIComponent(am[2]) : null;
+    await handleEngineRequest(username, sessionId, req, res, {
+      anthropicPath: am[3] + query,
+      translate: false,
+    });
+    return;
+  }
+  console.warn(`[llm] 适配层 404: ${req.method} ${rawUrl}`);
+  sse(res, 404, "not_found_error", "未知端点。");
 }

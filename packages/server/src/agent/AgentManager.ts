@@ -376,6 +376,10 @@ export class AgentManager {
     this.router.handleRegenerate(userId, sessionId);
   }
 
+  handleRecallMessage(userId: string, sessionId: string, ordinal: number, prefix: string): void {
+    void this.router.handleRecallMessage(userId, sessionId, ordinal, prefix);
+  }
+
   handlePermissionResponse(userId: string, requestId: string, allow: boolean): void {
     this.router.handlePermissionResponse(userId, requestId, allow);
   }

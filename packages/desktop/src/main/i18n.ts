@@ -36,6 +36,8 @@ export interface MenuStrings {
   minimize: string;
   close: string;
   about: string;
+  checkUpdate: string;
+  ok: string;
   langFollow: string;
   // native dialogs / tray / notifications
   workdirTitle: string;
@@ -55,6 +57,9 @@ export interface MenuStrings {
   updateFound: string; // {version}
   updateInstall: string;
   updateLater: string;
+  updateUpToDate: string; // {version}
+  updateDownloading: string; // {version}
+  updateCheckFailed: string;
 }
 
 const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
@@ -84,6 +89,8 @@ const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
     minimize: "最小化",
     close: "关闭",
     about: "关于 小蜻蜓",
+    checkUpdate: "检查更新",
+    ok: "知道了",
     langFollow: "跟随系统",
     workdirTitle: "选择智能体的工作目录（文件操作和命令都在此目录下进行）",
     workdirButton: "设为工作目录",
@@ -102,6 +109,9 @@ const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
     updateFound: "新版本 {version} 已下载完成，是否立即重启安装？",
     updateInstall: "立即安装",
     updateLater: "下次启动时",
+    updateUpToDate: "当前已是最新版本（v{version}）。",
+    updateDownloading: "发现新版本 {version}，正在后台下载，完成后会提示安装。",
+    updateCheckFailed: "检查更新失败：可能是网络不通或更新源暂时不可达，请稍后再试。",
   },
   en: {
     file: "File",
@@ -129,6 +139,8 @@ const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
     minimize: "Minimize",
     close: "Close",
     about: "About Xiaoqingting",
+    checkUpdate: "Check for Updates",
+    ok: "OK",
     langFollow: "Follow system",
     workdirTitle: "Choose the agent's work dir (file operations and commands run inside it)",
     workdirButton: "Set as work dir",
@@ -147,6 +159,9 @@ const STRINGS: Record<"zh-CN" | "en", MenuStrings> = {
     updateFound: "Version {version} has been downloaded. Restart and install now?",
     updateInstall: "Install now",
     updateLater: "On next launch",
+    updateUpToDate: "You're on the latest version (v{version}).",
+    updateDownloading: "Version {version} found — downloading in the background; you'll be prompted when it's ready.",
+    updateCheckFailed: "Update check failed — the network or the update source may be unreachable. Try again later.",
   },
 } as const;
 

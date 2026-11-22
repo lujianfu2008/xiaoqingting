@@ -75,6 +75,16 @@ export const WsError = z.object({
   message: z.string(),
 });
 
+// 撤回消息后的全量补发：携带裁剪后的完整块列表（服务端权威），客户端
+// 整表替换本地缓存——比「删到第 N 条」的增量指令更抗漂移（折叠 UI、
+// 迟到的推送都不会算错位置）。
+export const WsHistoryTruncated = z.object({
+  type: z.literal("history_truncated"),
+  session_id: z.string(),
+  blocks: z.array(Block),
+});
+export type WsHistoryTruncated = z.infer<typeof WsHistoryTruncated>;
+
 export const WsSessionCreated = z.object({
   type: z.literal("session_created"),
   session: SessionMeta,
@@ -153,6 +163,7 @@ export const ServerMessage = z.discriminatedUnion("type", [
   WsToolExecRequest,
   WsResult,
   WsError,
+  WsHistoryTruncated,
   WsSessionCreated,
   WsPresence,
   WsPong,

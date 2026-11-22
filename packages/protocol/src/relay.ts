@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { McpTransport } from "./mcp.js";
 
 // ---------- 网络中继 V2：消息级 LLM 桥 ----------
 //
@@ -56,6 +57,18 @@ export const McpRequest = z
     headers: z.record(z.string(), z.string().max(4000)).optional(),
     body: z.string().max(32 * 1024 * 1024).optional(),
     spawn: McpSpawn.optional(),
+    /** stdio 连接标识（Mcp-Session-Id 语义）：每条 MCP 客户端连接一个进程。
+     *  initialize 是连接级握手，按 name 复用进程会让第二条连接的 initialize
+     *  被已初始化的服务器拒绝（2026-11 everything 第二个会话挂载失败即此因）。
+     *  旧桌面 Zod 剥未知键，忽略此字段退回按 name 复用。 */
+    conn: z.string().max(64).optional(),
+    /** 注册配置摘要（服务端随帧下发）：桌面由此知道自己在代连哪个注册项。 */
+    server: z
+      .object({
+        type: McpTransport,
+        url: z.string().max(2048).optional(),
+      })
+      .optional(),
   })
   .superRefine((v, ctx) => {
     if (v.spawn && v.url) {

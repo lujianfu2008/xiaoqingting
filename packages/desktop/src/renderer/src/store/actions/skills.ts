@@ -1,10 +1,12 @@
 import type {
   ImportSkillsResult,
+  SkillMarkdownResponse,
   SkillRegistrySearchResponse,
   SkillsResponse,
 } from "@blm/protocol";
 import type { BlmState, GetState, SetState } from "../types";
 import { apiBase } from "../http";
+import { getMarketLang } from "../../lib/marketLang";
 import { t } from "../../i18n";
 
 // 专家技能管理。用户级走 /api/skills/*，全局（管理员）走 /api/admin/skills/*。
@@ -20,6 +22,12 @@ function errorText(code: string): string {
       return t("skills.errTooLarge");
     case "download_failed":
       return t("skills.errDownload");
+    case "bad_archive":
+      return t("skills.errArchive");
+    case "no_skills":
+      return t("skills.errNoSkills");
+    case "too_big":
+      return t("skills.errTooBig");
     case "invalid_request":
     case "invalid_json":
       return t("skills.errInvalid");
@@ -34,6 +42,17 @@ function errorText(code: string): string {
     default:
       return t("skills.saveFail");
   }
+}
+
+/** File → base64（分块拼接避免 call 栈爆掉）。 */
+export async function fileToBase64(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  const CH = 0x8000;
+  for (let i = 0; i < buf.length; i += CH) {
+    bin += String.fromCharCode(...buf.subarray(i, i + CH));
+  }
+  return btoa(bin);
 }
 
 async function request(
@@ -69,19 +88,25 @@ export function createSkillActions(
   | "loadSkills"
   | "saveSkill"
   | "deleteSkill"
+  | "readSkill"
+  | "setSkillEnabled"
   | "importSkills"
+  | "importSkillsArchive"
   | "installSkill"
   | "searchSkillRegistry"
   | "loadGlobalSkills"
   | "saveGlobalSkill"
   | "deleteGlobalSkill"
+  | "readGlobalSkill"
+  | "setGlobalSkillEnabled"
   | "importGlobalSkills"
+  | "importGlobalSkillsArchive"
   | "installGlobalSkill"
 > {
   return {
     async searchSkillRegistry(q) {
       const { serverUrl, token } = get();
-      const params = new URLSearchParams({ q });
+      const params = new URLSearchParams({ q, lang: getMarketLang() });
       return (await request(
         serverUrl,
         token,
@@ -93,7 +118,12 @@ export function createSkillActions(
       const { serverUrl, token } = get();
       if (!token) return;
       try {
-        const body = (await request(serverUrl, token, "/api/skills")) as SkillsResponse;
+        const params = new URLSearchParams({ lang: getMarketLang() });
+        const body = (await request(
+          serverUrl,
+          token,
+          `/api/skills?${params.toString()}`,
+        )) as SkillsResponse;
         set({ skills: body.skills });
       } catch {
         // offline — keep the last known list
@@ -117,6 +147,25 @@ export function createSkillActions(
       await get().loadSkills();
     },
 
+    async readSkill(name) {
+      const { serverUrl, token } = get();
+      const body = (await request(
+        serverUrl,
+        token,
+        `/api/skills/${encodeURIComponent(name)}`,
+      )) as SkillMarkdownResponse;
+      return body.markdown;
+    },
+
+    async setSkillEnabled(name, enabled) {
+      const { serverUrl, token } = get();
+      await request(serverUrl, token, `/api/skills/${encodeURIComponent(name)}/enabled`, {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
+      });
+      await get().loadSkills();
+    },
+
     async importSkills(json) {
       const { serverUrl, token } = get();
       const result = (await request(serverUrl, token, "/api/skills/import", {
@@ -129,18 +178,34 @@ export function createSkillActions(
 
     async installSkill(name, url) {
       const { serverUrl, token } = get();
-      await request(serverUrl, token, "/api/skills/install", {
+      const body = (await request(serverUrl, token, "/api/skills/install", {
         method: "POST",
         body: JSON.stringify({ name, url }),
-      });
+      })) as { ok?: boolean; name?: string };
       await get().loadSkills();
+      return body;
+    },
+
+    async importSkillsArchive(archiveBase64, filename) {
+      const { serverUrl, token } = get();
+      const result = (await request(serverUrl, token, "/api/skills/import-archive", {
+        method: "POST",
+        body: JSON.stringify({ archive: archiveBase64, filename }),
+      })) as ImportSkillsResult;
+      await get().loadSkills();
+      return result;
     },
 
     async loadGlobalSkills() {
       const { serverUrl, token } = get();
       if (!token) return;
       try {
-        const body = (await request(serverUrl, token, "/api/admin/skills")) as SkillsResponse;
+        const params = new URLSearchParams({ lang: getMarketLang() });
+        const body = (await request(
+          serverUrl,
+          token,
+          `/api/admin/skills?${params.toString()}`,
+        )) as SkillsResponse;
         set({ globalSkills: body.skills });
       } catch {
         // offline / non-admin — keep the last known list
@@ -164,6 +229,30 @@ export function createSkillActions(
       await get().loadGlobalSkills();
     },
 
+    async readGlobalSkill(name) {
+      const { serverUrl, token } = get();
+      const body = (await request(
+        serverUrl,
+        token,
+        `/api/admin/skills/${encodeURIComponent(name)}`,
+      )) as SkillMarkdownResponse;
+      return body.markdown;
+    },
+
+    async setGlobalSkillEnabled(name, enabled) {
+      const { serverUrl, token } = get();
+      await request(
+        serverUrl,
+        token,
+        `/api/admin/skills/${encodeURIComponent(name)}/enabled`,
+        {
+          method: "POST",
+          body: JSON.stringify({ enabled }),
+        },
+      );
+      await get().loadGlobalSkills();
+    },
+
     async importGlobalSkills(json) {
       const { serverUrl, token } = get();
       const result = (await request(serverUrl, token, "/api/skills/import", {
@@ -176,11 +265,22 @@ export function createSkillActions(
 
     async installGlobalSkill(name, url) {
       const { serverUrl, token } = get();
-      await request(serverUrl, token, "/api/skills/install", {
+      const body = (await request(serverUrl, token, "/api/skills/install", {
         method: "POST",
         body: JSON.stringify({ name, url, scope: "global" }),
-      });
+      })) as { ok?: boolean; name?: string };
       await get().loadGlobalSkills();
+      return body;
+    },
+
+    async importGlobalSkillsArchive(archiveBase64, filename) {
+      const { serverUrl, token } = get();
+      const result = (await request(serverUrl, token, "/api/skills/import-archive", {
+        method: "POST",
+        body: JSON.stringify({ archive: archiveBase64, filename, scope: "global" }),
+      })) as ImportSkillsResult;
+      await get().loadGlobalSkills();
+      return result;
     },
   };
 }

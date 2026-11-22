@@ -4,21 +4,29 @@ import {
   SkillName,
   UpsertSkillRequest,
   ImportSkillsRequest,
+  ImportArchiveRequest,
   InstallSkillRequest,
+  EnableSkillRequest,
+  SkillMarkdownResponse,
   type SkillInfo,
 } from "@blm/protocol";
 import type { AgentManager } from "../agent/AgentManager.js";
 import { config } from "../config.js";
 import { appendAudit } from "../audit.js";
 import { isPublicAdmin } from "../users.js";
-import { searchSkillRegistry } from "../skillRegistry.js";
+import { searchSkillRegistry, zhCardFor } from "../skillRegistry.js";
+import { translateToZh } from "../translate.js";
 import {
   SkillsConfigError,
   deleteSkill,
   installSkillFromUrl,
   installSkillMarkdown,
+  installSkillsFromArchive,
   listGlobalSkills,
   listSkills,
+  readSkillMarkdown,
+  setSkillEnabled,
+  type ArchiveInstallResult,
 } from "../skillsConfig.js";
 
 // 专家技能管理端点。
@@ -60,8 +68,38 @@ function parseImportedSkills(json: string): { name: string; markdown: string }[]
 export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager): void {
   // ---------- 用户级 ----------
 
+  // 已安装列表本地化：lang=zh 时官方收录技能用中文策展文案，其余经 LLM
+  // 批量翻译（translate.ts 内缓存，失败回原文）；lang 缺省/en 返回原文。
+  async function localizeSkills(
+    username: string,
+    skills: SkillInfo[],
+    lang?: "zh" | "en",
+  ): Promise<SkillInfo[]> {
+    if (lang !== "zh" || skills.length === 0) return skills;
+    const curated = skills.map((s) => zhCardFor(s.name));
+    const tr = await translateToZh(
+      username,
+      skills.map((s, i) => (curated[i] ? "" : (s.description ?? ""))),
+    );
+    return skills.map((s, i) => ({
+      ...s,
+      ...(curated[i] ? { title: curated[i]!.title } : {}),
+      description: curated[i]?.desc || tr[i] || s.description,
+    }));
+  }
+
   // 生效视图（全局 + 我的，同名以我的为准）。
-  app.get("/api/skills", (req) => ({ skills: listSkills(req.userId) }));
+  app.get("/api/skills", async (req) => {
+    const lang = z
+      .enum(["zh", "en"])
+      .safeParse((req.query as Record<string, unknown> | undefined)?.lang);
+    const skills = await localizeSkills(
+      req.userId,
+      listSkills(req.userId),
+      lang.success ? lang.data : undefined,
+    );
+    return { skills };
+  });
 
   app.put("/api/skills/:name", (req, reply) => {
     const name = (req.params as { name: string }).name;
@@ -85,6 +123,28 @@ export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager)
     }
     manager.disposeIdleSessions(req.userId);
     return reply.code(204).send();
+  });
+
+  // 读技能全文（编辑表单预填）。
+  app.get("/api/skills/:name", (req, reply) => {
+    const name = (req.params as { name: string }).name;
+    if (!validName(name)) return reply.code(400).send({ error: "invalid_name" });
+    const markdown = readSkillMarkdown("user", req.userId, name);
+    if (markdown === null) return reply.code(404).send({ error: "not_found" });
+    return { markdown };
+  });
+
+  // 启用/停用（配置保留；停用不挂会话、不可斜杠呼叫）。
+  app.post("/api/skills/:name/enabled", (req, reply) => {
+    const name = (req.params as { name: string }).name;
+    if (!validName(name)) return reply.code(400).send({ error: "invalid_name" });
+    const parsed = EnableSkillRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!setSkillEnabled("user", req.userId, name, parsed.data.enabled)) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    manager.disposeIdleSessions(req.userId);
+    return { ok: true };
   });
 
   // 粘贴导入（批量）。
@@ -127,6 +187,48 @@ export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager)
     return { imported, skipped };
   });
 
+  // 压缩包安装：zip 内容 base64 随 JSON 上传。布局自适应（单技能/多技能/
+  // GitHub 整仓自动剥包装层）；每技能只提取 SKILL.md（纯提示包边界，带脚本
+  // 的技能组整组跳过）。scope=global 仅管理员。
+  app.post(
+    "/api/skills/import-archive",
+    { bodyLimit: 32 * 1024 * 1024 },
+    async (req, reply) => {
+      const parsed = ImportArchiveRequest.safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+      const toGlobal = parsed.data.scope === "global";
+      if (toGlobal && !isPublicAdmin(req.userId)) {
+        return reply.code(403).send({ error: "forbidden" });
+      }
+      let result: ArchiveInstallResult;
+      try {
+        result = installSkillsFromArchive(
+          toGlobal ? "global" : "user",
+          req.userId,
+          Buffer.from(parsed.data.archive, "base64"),
+          parsed.data.filename ?? "",
+        );
+      } catch (e) {
+        if (e instanceof SkillsConfigError) return reply.code(400).send({ error: e.code });
+        throw e;
+      }
+      if (result.imported.length > 0) {
+        if (toGlobal) {
+          manager.disposeAllIdleSessions();
+          appendAudit({
+            actor: req.userId,
+            action: "skills.global_save",
+            target: "-",
+            detail: { via: "archive", imported: result.imported },
+          });
+        } else {
+          manager.disposeIdleSessions(req.userId);
+        }
+      }
+      return result;
+    },
+  );
+
   // 从市场安装（服务端下载 SKILL.md；scope=global 仅管理员）。
   app.post("/api/skills/install", async (req, reply) => {
     const parsed = InstallSkillRequest.safeParse(req.body ?? {});
@@ -135,8 +237,9 @@ export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager)
     if (toGlobal && !isPublicAdmin(req.userId)) {
       return reply.code(403).send({ error: "forbidden" });
     }
+    let installedName: string;
     try {
-      await installSkillFromUrl(
+      installedName = await installSkillFromUrl(
         toGlobal ? "global" : "user",
         req.userId,
         parsed.data.name,
@@ -151,13 +254,15 @@ export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager)
       appendAudit({
         actor: req.userId,
         action: "skills.global_save",
-        target: parsed.data.name,
+        target: installedName,
         detail: { via: "market" },
       });
     } else {
       manager.disposeIdleSessions(req.userId);
     }
-    return { ok: true };
+    // 最终落库名随响应返回（服务端可能做了 frontmatter 优先/规范化），
+    // 客户端以它为准展示「已安装为 xxx」。
+    return { ok: true as const, name: installedName };
   });
 
   // 市场搜索（代理 SKILLS_REGISTRY_URL 清单）。
@@ -169,11 +274,12 @@ export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager)
       .object({
         q: z.string().min(1).max(200),
         limit: z.coerce.number().int().min(1).max(50).default(20),
+        lang: z.enum(["zh", "en"]).optional(),
       })
       .safeParse((req.query ?? {}) as Record<string, unknown>);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
     try {
-      return await searchSkillRegistry(parsed.data.q, parsed.data.limit);
+      return await searchSkillRegistry(parsed.data.q, parsed.data.limit, parsed.data.lang);
     } catch (e) {
       if (e instanceof SkillsConfigError) return reply.code(502).send({ error: e.code });
       throw e;
@@ -181,9 +287,16 @@ export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager)
   });
 
   // ---------- 全局（仅公有域管理员） ----------
-  app.get("/api/admin/skills", (req, reply) => {
+  app.get("/api/admin/skills", async (req, reply) => {
     if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
-    const skills: SkillInfo[] = listGlobalSkills();
+    const lang = z
+      .enum(["zh", "en"])
+      .safeParse((req.query as Record<string, unknown> | undefined)?.lang);
+    const skills = await localizeSkills(
+      req.userId,
+      listGlobalSkills(),
+      lang.success ? lang.data : undefined,
+    );
     return { skills };
   });
 
@@ -218,5 +331,33 @@ export function registerSkillRoutes(app: FastifyInstance, manager: AgentManager)
     manager.disposeAllIdleSessions();
     appendAudit({ actor: req.userId, action: "skills.global_delete", target: name });
     return reply.code(204).send();
+  });
+
+  app.get("/api/admin/skills/:name", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const name = (req.params as { name: string }).name;
+    if (!validName(name)) return reply.code(400).send({ error: "invalid_name" });
+    const markdown = readSkillMarkdown("global", req.userId, name);
+    if (markdown === null) return reply.code(404).send({ error: "not_found" });
+    return { markdown };
+  });
+
+  app.post("/api/admin/skills/:name/enabled", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const name = (req.params as { name: string }).name;
+    if (!validName(name)) return reply.code(400).send({ error: "invalid_name" });
+    const parsed = EnableSkillRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!setSkillEnabled("global", req.userId, name, parsed.data.enabled)) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    manager.disposeAllIdleSessions();
+    appendAudit({
+      actor: req.userId,
+      action: "skills.global_toggle",
+      target: name,
+      detail: { enabled: parsed.data.enabled },
+    });
+    return { ok: true };
   });
 }

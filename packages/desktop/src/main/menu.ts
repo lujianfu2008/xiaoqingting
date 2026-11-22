@@ -3,6 +3,7 @@ import { LANGUAGES, menuStrings, resolveLanguage } from "./i18n";
 import { loadSettings, patchSettings, type Language } from "./settings";
 import { safeSend, windowAlive } from "./safeSend";
 import { wireViewerZoom } from "./zoom";
+import { checkNowDialog } from "./updater";
 
 // Localized application menu (文件/编辑/视图/窗口/设置/帮助). Electron
 // roles keep every accelerator and native behavior; only labels are overridden.
@@ -131,7 +132,18 @@ export function buildAppMenu(langSetting: Language): Menu {
     },
     {
       label: t.help,
-      submenu: [{ role: "about", label: t.about }],
+      submenu: [
+        {
+          label: t.checkUpdate,
+          click: (_mi, win) => {
+            // Electron types this as BaseWindow; only BrowserWindow has contents.
+            const w = win as import("electron").BrowserWindow | undefined;
+            void checkNowDialog(w);
+          },
+        },
+        { type: "separator" },
+        { role: "about", label: t.about },
+      ],
     },
   ];
 

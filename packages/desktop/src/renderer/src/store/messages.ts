@@ -1,7 +1,7 @@
 import type { ServerMessage } from "@blm/protocol";
 import { normalizeExpr } from "../components/DragonflyLogo";
 import { autoExecIfTrusted } from "./actions/chat";
-import { clearSendAck, clearSendAckByText, pendingAcksForSession, sendExecResult } from "./socket";
+import { clearSendAck, clearSendAckByText, pendingAcksForSession, sendExecResult, sendJson, socketOpen } from "./socket";
 import { armTurn, finishTurn, notifyConfirmNeeded } from "./notify";
 import { upsertSchedule } from "./actions/schedules";
 import { t } from "../i18n";
@@ -53,7 +53,24 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       }
       break;
 
+    case "history_truncated":
+      // 撤回消息后的全量补发：整表替换本地缓存（服务端权威），并清掉
+      // 该会话的流式残影与忙碌态（撤回只在空闲时被服务端接受）。
+      set((s) => ({
+        blocksBySession: { ...s.blocksBySession, [msg.session_id]: msg.blocks },
+        streaming: { ...s.streaming, [msg.session_id]: "" },
+        busy: { ...s.busy, [msg.session_id]: false },
+      }));
+      break;
+
     case "permission_request":
+      // 信任模式：引擎侧确认（外部 MCP 工具走这条流）也全免——直接应允，
+      // 不进弹窗队列。与本机执行的 autoExecIfTrusted 同一语义：信任模式 =
+      // 全自主运行（引擎原生工具在服务端被直接拒绝，从不产生此帧，无豁口）。
+      if (get().trustMode && socketOpen()) {
+        sendJson({ type: "permission_response", request_id: msg.request_id, allow: true });
+        break;
+      }
       // 并发审批：追加进队列（弹窗渲染队首，逐个应答）。
       set((s) => ({ pendingPermission: [...s.pendingPermission, msg] }));
       // 失焦时系统通知提醒（前台正看着就不打扰）。
@@ -103,6 +120,12 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
           [msg.session_id]: keepBusy,
         },
         streaming: { ...s.streaming, [msg.session_id]: "" },
+        // 本会话成功跑完一轮：早前挂在横幅上的报错（鉴权失败等）已过期——
+        // 报错所指的问题恢复后横幅就该消失。失败回合的 result 不算数
+        // （is_error=true，横幅描述的正是这一轮）。
+        ...(s.error && s.errorSession === msg.session_id && !msg.is_error
+          ? { error: null, errorCode: null, errorSession: null }
+          : {}),
         // 回合结束，该会话还挂着的审批/执行请求已过时：清掉，弹窗不残留。
         pendingPermission: s.pendingPermission.filter((r) => r.session_id !== msg.session_id),
         pendingExec: s.pendingExec.filter((r) => r.session_id !== msg.session_id),
@@ -142,7 +165,7 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       // 账号被管理员禁用：立即回到登录界面。
       if (msg.code === "account_disabled") {
         get().logout();
-        set({ error: t("li.disabled") });
+        set({ error: t("li.disabled"), errorCode: null, errorSession: null });
         break;
       }
       // 被管理员强制下线（账号未禁用，可重新登录）。
@@ -151,8 +174,18 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
         set({ authNotice: t("li.kicked") });
         break;
       }
+      // 撤回类回执（忙/无权/过期/定位失败）：动作反馈，不是会话级错误——
+      // 走数秒自动消失的轻提示。常驻横幅是全局状态、只在同一会话成功
+      // 跑完一轮后才撤，撤回失败挂上去会在所有会话里持续显示（实测踩过）。
+      if (msg.code.startsWith("recall_")) {
+        showNotice(set, msg.message);
+        break;
+      }
       set((s) => ({
         error: msg.message,
+        // 记下横幅来源：该会话下一轮成功跑完时据此撤掉（恢复不再粘着）。
+        errorCode: msg.code,
+        errorSession: msg.session_id,
         busy: msg.session_id ? { ...s.busy, [msg.session_id]: false } : s.busy,
         // 出错会话的待审批/待执行请求一并清掉（弹窗不残留）。
         pendingPermission: msg.session_id
@@ -180,6 +213,9 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
             ? s.updateRequests.map((r) => (r.request_id === msg.request.request_id ? msg.request : r))
             : [msg.request, ...s.updateRequests],
           error: t("ur.newRequest", { requester: msg.request.requester }),
+          // 横幅被借用为轻提示：来源标识一并清掉，别替旧错误背书。
+          errorCode: null,
+          errorSession: null,
         };
       });
       break;
@@ -198,6 +234,8 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
               ? t("ur.approvedToast", { path: msg.request.path })
               : t("ur.rejectedToast", { path: msg.request.path })
             : s.error,
+          // 同上：借用横幅时不留来源标识（保持原有错误则原样保留标识）。
+          ...(mine ? { errorCode: null, errorSession: null } : {}),
         };
       });
       break;

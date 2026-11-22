@@ -65,6 +65,7 @@ export function createChatActions(
   BlmState,
   | "send"
   | "regenerate"
+  | "recallMessage"
   | "interrupt"
   | "respondPermission"
   | "respondExec"
@@ -179,6 +180,18 @@ export function createChatActions(
       // busy 由 result/error 复位；断线重连路径里也会复位。
       sendJson({ type: "regenerate", session_id: currentSessionId });
       set((s) => ({ busy: { ...s.busy, [currentSessionId]: true } }));
+    },
+
+    recallMessage(sessionId, ordinal, prefix) {
+      const { wsStatus } = get();
+      if (!socketOpen() || wsStatus !== "connected") {
+        set({ error: t("err.offline") });
+        return;
+      }
+      // 撤回成功/失败都由服务端结算：成功推 history_truncated（整表替换），
+      // 失败推 error（含 busy/deny/stale/定位失败）→ 客户端按码走轻提示。
+      // busy 不在前端预拦：报错回执统一由服务端给，避免两处文案漂移。
+      sendJson({ type: "recall_message", session_id: sessionId, ordinal, prefix });
     },
 
     respondPermission(requestId, allow) {

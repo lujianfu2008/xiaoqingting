@@ -9,6 +9,66 @@ import { McpConfigError } from "./mcpConfig.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
 
+// ---------- 中文检索词扩展 ----------
+// 官方 Registry 目录全英文，中文查询原样传上去必空。把常见中文意图映射成
+// 英文检索词——映射到「检索词」而非具体服务器名，上游全量目录都参与匹配，
+// 覆盖不残缺。命中规则：查询与某个中文键互为子串即扩展，取最长命中；无
+// 命中原样透传（英文查询不受影响）。
+const ZH_SEARCH_EXPANSION: Record<string, string> = {
+  数据库: "database",
+  浏览器: "browser",
+  网页: "web",
+  抓取: "scraping",
+  爬虫: "scraping",
+  代码托管: "github",
+  版本控制: "git",
+  文件系统: "filesystem",
+  文件: "file",
+  记忆: "memory",
+  知识图谱: "memory",
+  搜索: "search",
+  翻译: "translate",
+  日历: "calendar",
+  日程: "calendar",
+  邮件: "email",
+  聊天: "chat",
+  图片: "image",
+  图像: "image",
+  视频: "video",
+  天气: "weather",
+  股票: "finance",
+  金融: "finance",
+  表格: "spreadsheet",
+  文档: "document",
+  演示: "presentation",
+  幻灯片: "presentation",
+  大模型: "llm",
+  地图: "map",
+  监控: "monitoring",
+  日志: "logs",
+  笔记: "notes",
+  任务: "task",
+  待办: "task",
+  自动化: "automation",
+  购物: "shopping",
+  音乐: "music",
+  时间: "time",
+  计算: "math",
+};
+
+function expandZhQuery(query: string): string {
+  let hit: string | null = null;
+  for (const key of Object.keys(ZH_SEARCH_EXPANSION)) {
+    if (
+      (query.includes(key) || key.includes(query)) &&
+      key.length > (hit?.length ?? 0)
+    ) {
+      hit = key;
+    }
+  }
+  return hit !== null ? ZH_SEARCH_EXPANSION[hit] : query;
+}
+
 // 原始条目里我们关心的字段（其余忽略）。字段名是上游 schema 定的 camelCase。
 interface RawRemoteHeader {
   name?: unknown;
@@ -101,7 +161,7 @@ export async function searchRegistry(
   cursor?: string,
 ): Promise<McpRegistrySearchResponse> {
   const url = new URL("/v0/servers", config.mcpRegistryUrl);
-  url.searchParams.set("search", query);
+  url.searchParams.set("search", expandZhQuery(query));
   url.searchParams.set("limit", String(limit));
   if (cursor) url.searchParams.set("cursor", cursor);
 

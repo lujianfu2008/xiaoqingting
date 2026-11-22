@@ -88,6 +88,31 @@ function RegenerateButton({
   );
 }
 
+// hover 撤回按钮：删除这条用户消息及其后所有内容（两层同步裁剪）。
+// 确认弹窗由调用方（ChatMessages）负责——那里知道会连带删多少块。
+function RecallButton({
+  disabled,
+  onRecall,
+}: {
+  disabled: boolean;
+  onRecall: () => void;
+}): React.JSX.Element {
+  const t = useT();
+  return (
+    <button
+      className="msg-action"
+      title={disabled ? t("chat.recallBusy") : t("chat.recallTip")}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onRecall();
+      }}
+    >
+      {t("chat.recall")}
+    </button>
+  );
+}
+
 // 子代理归属徽标：块由哪个子代理产生（主线程块无此字段，不渲染）。
 function AgentBadge({ block }: { block: { agent_name?: string } }): React.JSX.Element | null {
 if (!block.agent_name) return null;
@@ -223,16 +248,21 @@ export function MessageBlock({
   showRegenerate,
   regenDisabled,
   onRegenerate,
+  onRecall,
+  recallDisabled,
 }: {
   block: Block;
   /** 最后一条助手回复：回复下方显示「重新生成」。 */
   showRegenerate?: boolean;
   regenDisabled?: boolean;
   onRegenerate?: () => void;
+  /** 用户消息 hover 的「撤回」（仅主人视图传入）。 */
+  onRecall?: () => void;
+  recallDisabled?: boolean;
 }): React.JSX.Element {
 switch (block.kind) {
 case "user_text":
-return <UserText text={block.text} />;
+return <UserText text={block.text} onRecall={onRecall} recallDisabled={recallDisabled === true} />;
 case "text":
 return (
 <div className="msg-wrap">
@@ -280,7 +310,15 @@ return <FlowEventLine block={block} />;
 
 // user_text with [附件] name → path lines: those render as chips, everything
 // else stays plain text (same as before for messages without attachments).
-function UserText({ text }: { text: string }): React.JSX.Element {
+function UserText({
+  text,
+  onRecall,
+  recallDisabled,
+}: {
+  text: string;
+  onRecall?: () => void;
+  recallDisabled: boolean;
+}): React.JSX.Element {
   const openViewerFiles = useStore((s) => s.openViewerFiles);
   const parts: React.JSX.Element[] = [];
   let plain = "";
@@ -317,6 +355,7 @@ function UserText({ text }: { text: string }): React.JSX.Element {
       <div className="msg user">{parts}</div>
       <div className="msg-actions user-actions">
         <CopyButton text={copyTextValue} />
+        {onRecall && <RecallButton disabled={recallDisabled} onRecall={onRecall} />}
       </div>
     </div>
   );

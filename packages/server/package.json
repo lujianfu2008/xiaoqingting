@@ -16,6 +16,7 @@
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",
     "fastify": "^5.0.0",
+    "fflate": "^0.8.3",
     "jsonwebtoken": "^9.0.2",
     "playwright": "^1.65.0",
     "sherpa-onnx-node": "^1.13.8",

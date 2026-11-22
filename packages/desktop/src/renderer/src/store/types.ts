@@ -32,7 +32,8 @@ import type {
   UpsertWorkflowRequest,
   Usage,
   UserSummary,
-  UpdateLlmConfigRequest,
+  LlmSettingsPatch,
+  UpdateLlmProfileRequest,
   WorkflowInfo,
   WorkflowStage,
   WsPermissionRequest,
@@ -108,6 +109,12 @@ export interface BlmState {
   role: "admin" | "reviewer" | "user"; // 公有域角色（服务端确认；bootstrap admin 恒为 admin）
   wsStatus: WsStatus;
   error: string | null;
+  /** 当前 error 横幅的来源（仅 WS error 帧会标注）：错误码 + 出错会话。
+   *  用于「恢复后横幅自动消失」：该会话下一轮成功跑完、或 llm_auth 在
+   *  「我的大模型」配置保存成功时横幅已过期，不再永远粘着。其它途径
+   *  （REST 失败提示等）写 error 不带标识，也不会被误清。 */
+  errorCode: string | null;
+  errorSession: string | null;
   /** 链路恢复时要撤销的横幅文本（err.sendTimeout 类）：
    *  连接恢复/任一消息送达即清，不留「过期报错」。 */
   transientError: string | null;
@@ -257,7 +264,13 @@ export interface BlmState {
   loadShared(): Promise<void>;
   ownerOnlineOf(sessionId: string): boolean;
   loadLlmConfig(): Promise<void>;
-  saveLlmConfig(patch: UpdateLlmConfigRequest): Promise<void>;
+  /** 新建（patch.id 缺省）或编辑一条大模型配置。失败抛已翻译 Error。 */
+  saveLlmProfile(patch: UpdateLlmProfileRequest): Promise<void>;
+  setLlmProfileEnabled(id: string, enabled: boolean): Promise<void>;
+  deleteLlmProfile(id: string): Promise<void>;
+  /** 优先级重排（ids = 完整配置 id 序列，数组序即择优顺序）。 */
+  reorderLlmProfiles(ids: string[]): Promise<void>;
+  saveLlmSettings(patch: LlmSettingsPatch): Promise<void>;
   clearLlmConfig(): Promise<void>;
   // 网络中继（用户开关在设置面板；管理员配置在管理页）。
   loadMyRelay(): Promise<void>;
@@ -281,9 +294,16 @@ export interface BlmState {
   /** 安装/更新一个技能（SKILL.md 全文；同名即更新）。 */
   saveSkill(name: string, markdown: string): Promise<void>;
   deleteSkill(name: string): Promise<void>;
+  /** 读技能全文（编辑表单预填）。 */
+  readSkill(name: string): Promise<string>;
+  /** 启用/停用（配置保留；停用不挂会话、不可斜杠呼叫）。 */
+  setSkillEnabled(name: string, enabled: boolean): Promise<void>;
   importSkills(json: string): Promise<ImportSkillsResult>;
+  /** 压缩包安装（zip base64；服务端只提取 SKILL.md，返回 imported/skipped）。 */
+  importSkillsArchive(archiveBase64: string, filename: string): Promise<ImportSkillsResult>;
   /** 专家市场安装（服务端按 url 下载 SKILL.md）。 */
-  installSkill(name: string, url: string): Promise<void>;
+  /** 市场安装：返回服务端最终落库名（可能经 frontmatter 优先/规范化）。 */
+  installSkill(name: string, url: string): Promise<{ name?: string }>;
   /** 市场搜索（结果由面板自持，不进全局 store）。 */
   searchSkillRegistry(q: string): Promise<SkillRegistrySearchResponse>;
   // 全局技能（仅管理员）。
@@ -291,8 +311,14 @@ export interface BlmState {
   /** 安装/更新全局技能（SKILL.md 全文；同名即更新）。 */
   saveGlobalSkill(name: string, markdown: string): Promise<void>;
   deleteGlobalSkill(name: string): Promise<void>;
+  /** 读全局技能全文（编辑表单预填）。 */
+  readGlobalSkill(name: string): Promise<string>;
+  /** 启用/停用全局技能（配置保留）。 */
+  setGlobalSkillEnabled(name: string, enabled: boolean): Promise<void>;
   importGlobalSkills(json: string): Promise<ImportSkillsResult>;
-  installGlobalSkill(name: string, url: string): Promise<void>;
+  /** 压缩包安装到全局（zip base64；仅管理员）。 */
+  importGlobalSkillsArchive(archiveBase64: string, filename: string): Promise<ImportSkillsResult>;
+  installGlobalSkill(name: string, url: string): Promise<{ name?: string }>;
   // 工作流模板管理（模板名即主键；失败时抛出已翻译的 Error）。
   loadWorkflows(): Promise<void>;
   saveWorkflow(name: string, body: UpsertWorkflowRequest): Promise<void>;
@@ -324,6 +350,8 @@ export interface BlmState {
   send(text: string): boolean;
   /** 重新生成：对当前会话最后一条用户消息再跑一轮回复。 */
   regenerate(): void;
+  /** 撤回：删除指定用户消息及其后所有内容（引擎上下文与聊天记录两层同步裁剪）。 */
+  recallMessage(sessionId: string, ordinal: number, prefix: string): void;
   interrupt(): void;
   respondPermission(requestId: string, allow: boolean): void;
   respondExec(requestId: string, allow: boolean, trustFromNow: boolean): void;

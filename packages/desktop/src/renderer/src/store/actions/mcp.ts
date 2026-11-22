@@ -7,6 +7,7 @@ import type {
 } from "@blm/protocol";
 import type { BlmState, GetState, SetState } from "../types";
 import { apiBase } from "../http";
+import { getMarketLang } from "../../lib/marketLang";
 import { t } from "../../i18n";
 
 // MCP 服务器管理。用户级走 /api/mcp/*，全局（管理员）走 /api/admin/mcp/*。
@@ -80,7 +81,7 @@ export function createMcpActions(
   return {
     async searchMcpRegistry(q, cursor) {
       const { serverUrl, token } = get();
-      const params = new URLSearchParams({ q });
+      const params = new URLSearchParams({ q, lang: getMarketLang() });
       if (cursor) params.set("cursor", cursor);
       return (await request(
         serverUrl,

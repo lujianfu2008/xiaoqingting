@@ -11,7 +11,8 @@ import type { McpSpawn } from "@blm/protocol";
 // 工具型 MCP 服务器不用。子进程 env 取最小白名单 + 配置 env，不透传
 // 桌面主进程的完整环境。
 
-const IDLE_KILL_MS = 5 * 60_000; // 无请求 5 分钟收割进程
+const IDLE_KILL_MS = 5 * 60_000; // 无请求 5 分钟收割（仅旧版按 name 复用的进程）
+const CONN_IDLE_KILL_MS = 30 * 60_000; // 按连接隔离的进程：服务端会话 TTL 对齐
 const MAX_PROCS = 8; // LRU 上限（防 spawn 滥用）
 
 interface McpProc {
@@ -30,6 +31,11 @@ const procs = new Map<string, McpProc>();
 export interface McpTunnelRequest {
   req_id: string;
   name: string;
+  method?: "GET" | "POST" | "DELETE";
+  /** 连接标识（Mcp-Session-Id 语义）：每条 MCP 客户端连接一个进程——
+   *  initialize 是连接级握手，按 name 复用会让第二条连接被拒。
+   *  旧服务端帧没有此字段：退回按 name 复用（旧行为）。 */
+  conn?: string;
   body?: string;
   spawn: McpSpawn;
 }
@@ -68,11 +74,11 @@ function killIdle(name: string): void {
   p.waiters.clear();
 }
 
-function getProc(name: string, spawn: McpSpawn): McpProc | null {
+function getProc(name: string, spawn: McpSpawn, idleMs: number): McpProc | null {
   const cur = procs.get(name);
   if (cur?.alive) {
     clearTimeout(cur.idleTimer);
-    cur.idleTimer = setTimeout(() => killIdle(name), IDLE_KILL_MS);
+    cur.idleTimer = setTimeout(() => killIdle(name), idleMs);
     return cur;
   }
   // LRU 收割：超上限先杀最旧（Map 迭代序即插入序）。
@@ -104,7 +110,7 @@ function getProc(name: string, spawn: McpSpawn): McpProc | null {
     waiters: new Map(),
     timers: new Map(),
     buffer: "",
-    idleTimer: setTimeout(() => killIdle(name), IDLE_KILL_MS),
+    idleTimer: setTimeout(() => killIdle(name), idleMs),
     alive: true,
   };
   procs.set(name, proc);
@@ -132,6 +138,10 @@ function getProc(name: string, spawn: McpSpawn): McpProc | null {
   child.stderr?.on("data", () => {
     // stderr 仅丢弃（MCP 服务器普遍往 stderr 写日志）。
   });
+  // 子进程瞬间退出（python 未装/脚本缺失）时写 stdin 会 EPIPE：未处理的
+  // 'error' 事件会一路炸到主进程。进程死亡统一由 stdout 'end' → procFail
+  // 收尾，这里只消音。
+  child.stdin?.on("error", () => undefined);
   return proc;
 }
 
@@ -181,12 +191,34 @@ export function handleStdioMcpRequest(
   req: McpTunnelRequest,
   cb: McpTunnelCallbacks,
 ): { abort(): void } {
+  // 进程键：有 conn 按连接隔离（initialize 是连接级握手，且并发连接的
+  // JSON-RPC id 会在共享进程里互相串线）；无 conn（旧服务端）退回按 name。
+  const key = req.conn ? `${req.name}\u0000${req.conn}` : req.name;
+  const idleMs = req.conn ? CONN_IDLE_KILL_MS : IDLE_KILL_MS;
+
+  // DELETE：SDK terminateSession——终结该连接的进程（会话表由服务端清）。
+  if (req.method === "DELETE") {
+    killIdle(key);
+    cb.onHead(200, "application/json");
+    cb.onData("{}");
+    cb.onEnd();
+    return { abort: () => undefined };
+  }
+  // GET（SDK 尝试开服务端→客户端 SSE 流）：stdio 门面不提供，按规范 405
+  //（SDK 视为「服务器不支持」正常继续），不 spawn、不往进程里写垃圾。
+  if (req.method === "GET") {
+    cb.onHead(405, "application/json");
+    cb.onData("{}");
+    cb.onEnd();
+    return { abort: () => undefined };
+  }
+
   const bodyText = req.body ?? "";
   const jsonId = extractId(bodyText);
 
   // notification（无 id）：写入即回 202，不等响应。
   if (jsonId === null) {
-    const proc = getProc(req.name, req.spawn);
+    const proc = getProc(key, req.spawn, idleMs);
     if (!proc) {
       cb.onHead(500, "application/json");
       cb.onData(JSON.stringify({ error: "MCP 服务器进程启动失败" }));
@@ -200,7 +232,7 @@ export function handleStdioMcpRequest(
     return { abort: () => undefined };
   }
 
-  const proc = getProc(req.name, req.spawn);
+  const proc = getProc(key, req.spawn, idleMs);
   if (!proc) {
     cb.onHead(500, "application/json");
     cb.onData(JSON.stringify({ error: "MCP 服务器进程启动失败" }));

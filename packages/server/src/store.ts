@@ -380,4 +380,16 @@ export class Store {
       return [];
     }
   }
+
+  /** 整表替换会话历史（撤回消息用）：临时文件 + 原子改名，中途断电
+   *  不会留下截了一半的记录。blocks 为空 = 会话回到零消息状态。 */
+  setHistory(sessionId: string, blocks: Block[]): void {
+    const target = this.historyPath(sessionId);
+    const tmp = `${target}.tmp`;
+    fs.writeFileSync(
+      tmp,
+      blocks.map((b) => JSON.stringify(b)).join("\n") + (blocks.length > 0 ? "\n" : ""),
+    );
+    fs.renameSync(tmp, target);
+  }
 }

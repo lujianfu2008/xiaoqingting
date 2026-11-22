@@ -3,7 +3,7 @@ import { autoUpdater } from "electron-updater";
 // （npm 去重后顶层的与此不同构）——CancellationToken 必须
 // 从它真正消费的包导入，否则类型不兼容。
 import { CancellationToken } from "electron-updater/node_modules/builder-util-runtime";
-import { BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import { uiStrings } from "./i18n";
 import { currentLanguage } from "./menu";
 
@@ -133,6 +133,29 @@ export function checkNow(): Promise<"up_to_date" | "available" | "error"> {
     // 启动（见 wireEvents），这里只管检查结果。
     void autoUpdater.checkForUpdates().catch(() => settle("error"));
   });
+}
+
+/** 帮助菜单「检查更新」入口：检查并把结果用原生弹窗告知
+ * （设置面板多半没开，就地反馈不可见）。发现新版时后台下载
+ * 照旧由 wireEvents 起步，进度浮条全窗可见，完成仍走安装
+ * 确认弹窗——这里只补「没新版/检查失败」这两个原本无处安放的
+ * 结果。 */
+export async function checkNowDialog(win?: BrowserWindow): Promise<void> {
+  const target =
+    win && !win.isDestroyed()
+      ? win
+      : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+  const base = uiStrings(currentLanguage(), { version: app.getVersion() });
+  const r = await checkNow();
+  const box =
+    r === "up_to_date"
+      ? { type: "info" as const, title: base.checkUpdate, message: base.updateUpToDate }
+      : r === "available"
+        ? { type: "info" as const, title: base.updateTitle, message: base.updateDownloading }
+        : { type: "warning" as const, title: base.checkUpdate, message: base.updateCheckFailed };
+  const opts = { ...box, buttons: [base.ok], noLink: true };
+  if (target) void dialog.showMessageBox(target, opts);
+  else void dialog.showMessageBox(opts);
 }
 
 function wireEvents(): void {

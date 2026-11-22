@@ -11,6 +11,7 @@ import type { AgentManager } from "../agent/AgentManager.js";
 import { appendAudit } from "../audit.js";
 import { isPublicAdmin } from "../users.js";
 import { searchRegistry } from "../mcpRegistry.js";
+import { translateToZh } from "../translate.js";
 import {
   McpConfigError,
   RESERVED_MCP_NAMES,
@@ -156,17 +157,31 @@ export function registerMcpRoutes(app: FastifyInstance, manager: AgentManager): 
   });
 
   // 官方 MCP Registry 市场搜索（代理，规避 CORS；安装仍走上面的写入端点）。
+  // lang=zh：描述经 LLM 批量译成中文（走搜索者自己的 LLM 与桌面网络，结果
+  // 缓存；翻译失败/未配置模型时原样返回英文，搜索永不变慢死）。
   app.get("/api/mcp/registry/search", async (req, reply) => {
     const parsed = z
       .object({
         q: z.string().min(1).max(200),
         limit: z.coerce.number().int().min(1).max(50).default(20),
         cursor: z.string().max(300).optional(),
+        lang: z.enum(["zh", "en"]).optional(),
       })
       .safeParse((req.query ?? {}) as Record<string, unknown>);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
     try {
-      return await searchRegistry(parsed.data.q, parsed.data.limit, parsed.data.cursor);
+      const result = await searchRegistry(parsed.data.q, parsed.data.limit, parsed.data.cursor);
+      if (parsed.data.lang === "zh" && result.servers.length > 0) {
+        const translated = await translateToZh(
+          req.userId,
+          result.servers.map((s) => s.description),
+        );
+        return {
+          ...result,
+          servers: result.servers.map((s, i) => ({ ...s, description: translated[i] ?? s.description })),
+        };
+      }
+      return result;
     } catch (e) {
       if (e instanceof McpConfigError) return reply.code(502).send({ error: e.code });
       throw e;
