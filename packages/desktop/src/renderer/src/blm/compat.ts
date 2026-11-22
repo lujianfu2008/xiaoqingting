@@ -261,6 +261,10 @@ export function createBlmCompat(): typeof window.blm {
       call<{ dataUrl?: string; error?: string }>("attachments.preview", { path }),
     markAttachments: (sessionId: string, paths: string[]) =>
       call<void>("attachments.mark", { session_id: sessionId, paths }),
+    // 上传第一跳（读标记附件字节）：壳侧暂无 attachments.read 能力，
+    // 如实报错——发送流会退回本地路径行并提示「对方可能无法查看」。
+    readAttachmentBytes: () =>
+      Promise.resolve({ error: "当前客户端暂不支持共享附件上传" }),
 
     exportChat: (req: { default_filename: string; markdown: string }) =>
       call<{ saved: boolean; path: string | null; error?: string }>(

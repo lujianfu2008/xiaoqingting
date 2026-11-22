@@ -15,6 +15,7 @@ import { registerWorkflowRoutes } from "./workflowRoutes.js";
 import { registerScheduleRoutes } from "./scheduleRoutes.js";
 import { registerRelayRoutes } from "./relayRoutes.js";
 import { registerDownloadRoutes } from "./downloadRoutes.js";
+import { registerAttachmentRoutes } from "./attachmentRoutes.js";
 
 // Composes the REST surface. Auth goes first because it also installs the JWT
 // onRequest hook that protects every route registered after it.
@@ -25,7 +26,6 @@ export function registerRoutes(
   store: Store,
   scheduler: ScheduleScheduler,
 ): void {
-  void store; // kept for the existing call signature in index.ts
   registerAuthRoutes(app, manager);
   registerSessionRoutes(app, manager);
   registerAdminRoutes(app, manager);
@@ -38,6 +38,8 @@ export function registerRoutes(
   registerWorkflowRoutes(app, manager);
   registerScheduleRoutes(app, manager, scheduler);
   registerRelayRoutes(app, manager);
+  // 共享会话附件托管（上传/下载，字节随会话生命周期）。
+  registerAttachmentRoutes(app, store);
   // 更新包分发（/download/:file，白名单目录；免鉴权，登录前也能检查更新）。
   registerDownloadRoutes(app);
 }

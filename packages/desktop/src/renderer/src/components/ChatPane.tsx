@@ -266,7 +266,7 @@ addAttachments([{ name, path: p, dataUrl }]);
 }
 };
 
-const submit = (): void => {
+const submit = async (): Promise<void> => {
 const text = draft.trim();
 if ((!text && attachments.length === 0) || (sharedView && !ownerOnline)) return;
 // 回合进行中（busy）也可以发送：消息进入引擎队列，在两次工具调用之间被
@@ -280,7 +280,7 @@ return;
 }
 // send 返回 false = 未发出（断线）：保留草稿和附件，用户可直接重试。
 // 附件随消息走（send 内标记/清空/失败放回），这里只传文本。
-if (send(text)) {
+if (await send(text)) {
 setDraft("");
 }
 };

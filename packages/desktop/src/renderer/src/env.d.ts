@@ -139,6 +139,11 @@ declare global {
       ): Promise<{ path?: string; error?: string }>;
       previewAttachment(path: string): Promise<{ dataUrl?: string; error?: string }>;
       markAttachments(sessionId: string, paths: string[]): Promise<void>;
+      /** 共享会话附件上传第一跳：读本会话已标记附件（或附件目录内文件）的字节。 */
+      readAttachmentBytes(
+        sessionId: string,
+        path: string,
+      ): Promise<{ base64?: string; name?: string; size?: number; error?: string }>;
       exportChat(req: {
         default_filename: string;
         markdown: string;

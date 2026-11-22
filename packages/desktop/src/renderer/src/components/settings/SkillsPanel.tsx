@@ -174,12 +174,15 @@ function SkillForm({
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async (): Promise<void> => {
-    setErr(null);
-    const trimmed = name.trim();
-    if (!trimmed) {
+    // name: 前缀（配置文件粘贴）先剥掉，name 是 key、值才是名字。
+    const trimmed = name.trim().replace(/^name:\s*/, "");
+    // 前端先校验一次名字（与服务端同名规则），非法立即给出提示，避免
+    // 白走一趟网络后才弹错。
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(trimmed)) {
       setErr(t("skills.errInvalidName"));
       return;
     }
+    setErr(null);
     setBusy(true);
     try {
       await saveSkill(trimmed, markdown);

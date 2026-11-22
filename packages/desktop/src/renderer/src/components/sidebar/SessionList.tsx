@@ -12,6 +12,7 @@ import { apiBase } from "../../store/http";
 import { useT } from "../../i18n";
 import { blocksToMarkdown } from "../../lib/exportMarkdown";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { EditScheduleDialog } from "./EditScheduleDialog";
 import { NewScheduleDialog } from "./NewScheduleDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 
@@ -235,7 +236,13 @@ const groupHeaderStyle = {
 
 // 定时任务紧凑行（项目组内）：名称/下次运行/立即执行/启停/打开会话/删除。
 // 整行可点进专属会话（行内按钮 stopPropagation 不抢）。
-function ScheduleRow({ rec }: { rec: ScheduleView }): React.JSX.Element {
+function ScheduleRow({
+  rec,
+  onEdit,
+}: {
+  rec: ScheduleView;
+  onEdit: (rec: ScheduleView) => void;
+}): React.JSX.Element {
   const setScheduleEnabled = useStore((s) => s.setScheduleEnabled);
   const deleteSchedule = useStore((s) => s.deleteSchedule);
   const triggerSchedule = useStore((s) => s.triggerSchedule);
@@ -323,6 +330,16 @@ function ScheduleRow({ rec }: { rec: ScheduleView }): React.JSX.Element {
           →
         </button>
       )}
+      <button
+        className="del"
+        title={t("sc.edit")}
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit(rec);
+        }}
+      >
+        ✎
+      </button>
       <button
         className="del"
         title={t("sc.delete")}
@@ -440,6 +457,7 @@ function ProjectGroup({
   onSettings,
   onNewTask,
   onNewSchedule,
+  onEditSchedule,
 }: {
   project: ProjectMeta;
   sessions: SessionMeta[];
@@ -451,6 +469,7 @@ function ProjectGroup({
   onSettings: () => void;
   onNewTask: () => void;
   onNewSchedule: () => void;
+  onEditSchedule: (rec: ScheduleView) => void;
 }): React.JSX.Element {
   const currentSessionId = useStore((s) => s.currentSessionId);
   const sharedView = useStore((s) => s.sharedView);
@@ -606,7 +625,7 @@ function ProjectGroup({
           <div style={{ paddingLeft: 14 }}>
             {projScheds.map((rec) => (
               <div key={rec.schedule_id}>
-                <ScheduleRow rec={rec} />
+                <ScheduleRow rec={rec} onEdit={onEditSchedule} />
                 {rec.session_id && (
                   <div style={{ paddingLeft: 14 }}>
                     {sessions
@@ -684,6 +703,9 @@ export function SessionList({
   const [newTaskProject, setNewTaskProject] = useState<ProjectMeta | null>(null);
   // 定时任务项目组内「＋新建定时任务」。
   const [newScheduleProject, setNewScheduleProject] = useState<ProjectMeta | null>(null);
+  // 正在编辑的定时任务（✎ 按钮置位；弹窗内 ScheduleForm 提交）。
+  const [editingSchedule, setEditingSchedule] = useState<ScheduleView | null>(null);
+
 
   // 项目组展开状态（FIFO 淘汰）：同时最多展开 2 个项目，展开第 3 个
   // 时最早展开的自动收起；搜索时强制全展开（命中会话不能被折叠藏掉）。
@@ -893,6 +915,7 @@ export function SessionList({
             setNewTaskOpen(true);
           }}
           onNewSchedule={() => setNewScheduleProject(p)}
+          onEditSchedule={setEditingSchedule}
         />
       ))}
 
@@ -915,6 +938,7 @@ export function SessionList({
             setNewTaskOpen(true);
           }}
           onNewSchedule={() => setNewScheduleProject(p)}
+          onEditSchedule={setEditingSchedule}
         />
       ))}
 
@@ -937,6 +961,7 @@ export function SessionList({
             setNewTaskOpen(true);
           }}
           onNewSchedule={() => setNewScheduleProject(p)}
+          onEditSchedule={setEditingSchedule}
         />
       ))}
 
@@ -959,6 +984,7 @@ export function SessionList({
             setNewTaskOpen(true);
           }}
           onNewSchedule={() => setNewScheduleProject(p)}
+          onEditSchedule={setEditingSchedule}
         />
       ))}
       </div>
@@ -1015,6 +1041,12 @@ export function SessionList({
         <NewScheduleDialog
           project={newScheduleProject}
           onClose={() => setNewScheduleProject(null)}
+        />
+      )}
+      {editingSchedule && (
+        <EditScheduleDialog
+          schedule={editingSchedule}
+          onClose={() => setEditingSchedule(null)}
         />
       )}
 

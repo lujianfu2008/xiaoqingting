@@ -1,4 +1,6 @@
 import type { BlmState, GetState, SetState } from "../types";
+import { t } from "../../i18n";
+import { downloadAttachment, isAttRef, parseAttRef } from "../../lib/attachmentRef";
 
 // 内置文件阅读器：多 tab、只读。openViewerFiles 按 path 去重
 // （已开的直接激活），treeRoot 取新文件的目录。关掉最后一个 tab
@@ -25,6 +27,31 @@ export function createViewerActions(
   return {
     openViewerFiles(paths) {
       if (paths.length === 0) return;
+      // 共享会话附件引用（att:<sid>/<id>）：字节在服务端，先拉取落到本机
+      // 附件目录（豁免围栏）再按本地路径打开——协作者、宿主同一入口。
+      if (paths.some((p) => isAttRef(p))) {
+        void (async () => {
+          const local: string[] = [];
+          const { serverUrl, token } = get();
+          for (const p of paths) {
+            const ref = parseAttRef(p);
+            if (!ref) {
+              local.push(p);
+              continue;
+            }
+            try {
+              const { bytes, name } = await downloadAttachment(serverUrl, token ?? "", ref);
+              const saved = await window.blm.saveAttachment(ref.sessionId, name, bytes);
+              if (saved.path) local.push(saved.path);
+              else set({ transientError: saved.error ?? t("err.attachFetchFail") });
+            } catch {
+              set({ transientError: t("err.attachFetchFail") });
+            }
+          }
+          if (local.length > 0) get().openViewerFiles(local);
+        })();
+        return;
+      }
       const cur = get().viewer;
       const tabs = [...cur.tabs];
       let last: string | null = cur.activeId;

@@ -62,6 +62,9 @@ export interface SessionAttachment {
   name: string;
   path: string; // absolute path on this machine
   dataUrl?: string;
+  /** 共享会话/协作线程：挑选时后台上传服务端托管后的引用
+   *  （att:<sessionId>/<id>）；缺失 = 上传未完成/失败，发送时退回本地路径。 */
+  ref?: string;
 }
 
 /** 阅读器一个 tab：一个正在看的本机文件。 */
@@ -346,8 +349,10 @@ export interface BlmState {
   closeTab(id: string): void;
   /** 关除指定 tab 外的全部（tab 右键「关闭其他」；焦点切到保留的 tab）。 */
   closeOtherTabs(id: string): void;
-  /** 发送一条用户消息；false = 未发出（断线），草稿保留。 */
-  send(text: string): boolean;
+  /** 发送一条用户消息；false = 未发出（断线），草稿保留。
+   *  async：共享会话先等附件上传完成（消息快过文件会让宿主读到
+   *  不可达路径，见 feedback：共享附件由宿主拉取、发送方只传字节）。 */
+  send(text: string): Promise<boolean>;
   /** 重新生成：对当前会话最后一条用户消息再跑一轮回复。 */
   regenerate(): void;
   /** 撤回：删除指定用户消息及其后所有内容（引擎上下文与聊天记录两层同步裁剪）。 */

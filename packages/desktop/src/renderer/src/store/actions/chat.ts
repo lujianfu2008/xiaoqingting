@@ -4,6 +4,20 @@ import { sendExecResult, sendJson, socketOpen, armSendAck, pendingAcksForSession
 import { useStore } from "../index";
 import { stopAudio } from "../../speech";
 import { t } from "../../i18n";
+import { base64ToBytes, downloadAttachment, isAttRef, parseAttRef, uploadAttachment } from "../../lib/attachmentRef";
+
+// 共享会话附件上传 Promise 追踪：addAttachments 后台上传（挑选/粘贴即
+// 开始），send 发送前 await 本会话所有在途上传，确保消息里带的是已就绪
+// 的 att: 服务端引用而非发送方本机路径——消息先于文件到达会让宿主读到
+// 一个不可达路径（跨机必失败），见 feedback：共享附件由宿主拉取，发送方
+// 只负责把字节先传上服务器。key = `${sid}::${path}`。
+const pendingUploads = new Map<string, Promise<void>>();
+
+/** 等待某会话所有在途附件上传完成。 */
+function waitAttachments(sid: string): Promise<void> {
+  const ups = [...pendingUploads.entries()].filter(([k]) => k.startsWith(`${sid}::`));
+  return Promise.all(ups.map(([, p]) => p.catch(() => undefined))).then(() => undefined);
+}
 
 function runLocally(
   req: {
@@ -13,6 +27,33 @@ function runLocally(
     session_id?: string;
   },
 ): void {
+  // 共享会话附件引用（att:<sid>/<id>）：字节在服务端托管，先拉取落到
+  // 本机附件目录（豁免围栏），再按本地路径走既有执行链路——引擎在宿主
+  // 机器上读协作方粘贴的文件由此打通；宿主自己发的文件路径本机就有，
+  // 不走这条。
+  if (req.action === "read_attachment" && typeof req.params.path === "string" && isAttRef(req.params.path)) {
+    const ref = parseAttRef(req.params.path);
+    if (!ref) {
+      sendExecResult(req.request_id, { ok: false, error: "附件引用格式无效" });
+      return;
+    }
+    void (async () => {
+      try {
+        const { serverUrl, token } = useStore.getState();
+        const { bytes, name } = await downloadAttachment(serverUrl, token ?? "", ref);
+        const sid = req.session_id ?? ref.sessionId;
+        const saved = await window.blm.saveAttachment(sid, name, bytes);
+        if (!saved.path) throw new Error(saved.error ?? "附件保存失败");
+        runLocally({ ...req, params: { ...req.params, path: saved.path } });
+      } catch (e) {
+        sendExecResult(req.request_id, {
+          ok: false,
+          error: `附件取回失败：${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    })();
+    return;
+  }
   // Run in the Electron main process, then report back. session_id lets the
   // main process confine project-bound sessions to their own folder.
   window.blm
@@ -77,7 +118,7 @@ export function createChatActions(
   | "setRecording"
 > {
   return {
-    send(text) {
+    async send(text) {
       const { currentSessionId, wsStatus, sharedView } = get();
       if (!socketOpen() || wsStatus !== "connected" || !currentSessionId) {
         // 断线/半开连接：明确反馈而不是静默丢弃；调用方保留草稿不清空。
@@ -106,7 +147,19 @@ export function createChatActions(
       // Mark them in the main process first: files kept at their original
       // location (drag/pick) must stay readable even outside the access scope.
       void window.blm.markAttachments(sid, attachments.map((a) => a.path));
-      const lines = attachments.map((a) => `[附件] ${a.name} → ${a.path}`);
+      // 共享会话：消息里的 att: 引用必须就绪再发——先等本会话所有在途上传
+      // 完成（上传失败的附件已被 addAttachments 移除，不会进消息），避免
+      // "消息快于文件"让宿主读到发送方本机才有的路径。非共享会话无此问题
+      // （引擎执行面在本机，路径直接可用）。
+      if (sharedView || attachments.some((a) => a.ref)) {
+        await waitAttachments(sid);
+      }
+      // 共享会话：重新读一次附件（upload 完成 ref 已挂上；上传失败项已被
+      // 移除，这里兜底过滤掉 ref 为空的项，绝不带本地路径跨机）。
+      const finalAttachments = (sharedView ? attachments.filter((a) => !!a.ref) : attachments).filter(
+        (a) => !!a.path && (a.ref || !sharedView),
+      );
+      const lines = finalAttachments.map((a) => `[附件] ${a.name} → ${a.ref ?? a.path}`);
       const outgoing = [text, ...lines].filter(Boolean).join("\n\n");
       // 每条消息自带送达确认 id：回合进行中连发补充消息时，多个 ack 各自独立
       // 结算，服务端回显该 id 的 user_text 块即确认。
@@ -145,10 +198,11 @@ export function createChatActions(
               ? `${text}\n${s.draftsBySession[sid]}`
               : text,
           },
-          // 失败时附件放回该会话（成功发送时已清）。
+          // 失败时附件放回该会话（成功发送时已清）。放回 finalAttachments
+          // （过滤后，不含上传失败被移除的项），已移除项不再复活。
           attachments: {
             ...s.attachments,
-            [sid]: [...(s.attachments[sid] ?? []), ...attachments],
+            [sid]: [...(s.attachments[sid] ?? []), ...finalAttachments],
           },
         }));
       });
@@ -260,6 +314,59 @@ export function createChatActions(
         const add = items.filter((x) => !cur.some((y) => y.path === x.path));
         return { attachments: { ...s.attachments, [sid]: [...cur, ...add] } };
       });
+      // 粘贴的截图等临时文件（Windows 上 Electron pathForFile 会指向
+      // %TEMP% 下的临时副本）在主进程 read-bytes 只放行「附件目录内或本
+      // 会话已标记」——把本次添加的路径现在就标记（用户主动添加即意图，
+      // 与发送时 markAttachments 同一语义），避免后台上传被守卫拒绝而
+      // 让消息退回本地 temp 路径（跨机必读不到）。
+      void window.blm.markAttachments(sid, items.map((x) => x.path));
+      // 共享会话/协作线程：挑选/粘贴时即后台上传服务端托管，引用挂到
+      // 附件条目（发送时行里直接用）。失败只提示不打断——发送时该条
+      // 退回本地路径行，用户可重试（删掉重贴）。
+      const { serverUrl, token, sessions, sharedSessions, sharedView } = get();
+      const meta =
+        sessions.find((x) => x.session_id === sid) ??
+        sharedSessions.find((x) => x.session_id === sid);
+      const isShared =
+        !!sharedView || meta?.shared === true || (meta?.shared_with?.length ?? 0) > 0;
+      if (!isShared) return;
+      for (const item of items) {
+        const key = `${sid}::${item.path}`;
+        const p = (async () => {
+          try {
+            const r = await window.blm.readAttachmentBytes(sid, item.path);
+            if (!r.base64) throw new Error(r.error ?? "read failed");
+            const ref = await uploadAttachment(
+              serverUrl,
+              token ?? "",
+              sid,
+              r.name ?? item.name,
+              r.base64,
+            );
+            set((s) => ({
+              attachments: {
+                ...s.attachments,
+                [sid]: (s.attachments[sid] ?? []).map((x) =>
+                  x.path === item.path ? { ...x, ref } : x,
+                ),
+              },
+            }));
+          } catch {
+            // 上传失败：从会话附件里移除该项，避免发送时回落本地路径
+            // 让宿主读到不可达文件。提示后用户可重试（删掉重贴）。
+            set((s) => ({
+              attachments: {
+                ...s.attachments,
+                [sid]: (s.attachments[sid] ?? []).filter((x) => x.path !== item.path),
+              },
+              transientError: t("err.attachUploadFail"),
+            }));
+          } finally {
+            pendingUploads.delete(key);
+          }
+        })();
+        pendingUploads.set(key, p);
+      }
     },
 
     removeAttachment(index) {

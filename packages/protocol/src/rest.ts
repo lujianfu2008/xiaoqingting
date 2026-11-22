@@ -289,3 +289,25 @@ export type AuditEntry = z.infer<typeof AuditEntry>;
 
 export const AuditLogResponse = z.object({ entries: z.array(AuditEntry) });
 export type AuditLogResponse = z.infer<typeof AuditLogResponse>;
+
+// ---------- 共享会话附件（跨机可见） ----------
+
+// 共享会话/协作线程里粘贴的附件上传到服务端托管：消息里的 [附件] 行改带
+// `att:<sessionId>/<id>` 引用，协作者查看与引擎 read_attachment 都按引用
+// 从服务端取回。单文件上限与桌面 read_attachment 的 10MB 对齐（base64
+// 后约 13.7MB，路由 bodyLimit 放到 20MB）。
+export const AttachmentUploadRequest = z.object({
+  name: z.string().min(1).max(200),
+  data: z
+    .string()
+    .regex(/^[A-Za-z0-9+/=]+$/, "附件数据必须是 base64")
+    .max(16_000_000), // 12MB base64 ≈ 9MB 原文，留出余量
+});
+export type AttachmentUploadRequest = z.infer<typeof AttachmentUploadRequest>;
+
+export const AttachmentUploadResponse = z.object({
+  ok: z.literal(true),
+  id: z.string(),
+  name: z.string(),
+});
+export type AttachmentUploadResponse = z.infer<typeof AttachmentUploadResponse>;

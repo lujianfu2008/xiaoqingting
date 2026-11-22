@@ -28,15 +28,20 @@ export const USER_PLUGIN_NAME = "user-skills";
 
 export const MAX_SKILL_BYTES = 262_144; // 256KB，与协议侧 UpsertSkillRequest 上限一致
 
-// 用户名会进数据目录路径（注册处无字符集限制），这里做双重校验防路径穿越。
-const USERNAME_RE = /^[\w.-]{1,64}$/;
+// 用户名会进数据目录路径。注册处允许中文等任意字符（工号/用户名两命名
+// 空间），这里不能按 ASCII 白名单拒中文——只做路径安全校验：长度限制 +
+// 拒绝路径分隔符/穿越/控制字符，保留中文等 Unicode 用户名。
+const USERNAME_OK_RE = /^[^\0/\\:.][^\0/\\:.]{0,62}$/;
 
 function globalDir(): string {
   return path.join(config.dataDir, "skills", "global");
 }
 
 function userDir(username: string): string | null {
-  if (!username || !USERNAME_RE.test(username)) return null;
+  // `..` 单独出现即路径穿越；其余由上面的字符集兜住（:. / \ 全拒，
+  // 文件名不会带盘符/分隔符）。空串、超长、控制字符都被 USERNAME_OK_RE 拒掉。
+  if (!username || username.length > 63 || !USERNAME_OK_RE.test(username)) return null;
+  if (username === ".." || username.endsWith(".")) return null;
   return path.join(config.dataDir, "skills", "users", username);
 }
 

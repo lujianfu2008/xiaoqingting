@@ -90,7 +90,10 @@ export function registerScheduleRoutes(
     if (scheduleNameTaken(req.userId, parsed.data.name, id)) {
       return reply.code(400).send({ error: "name_taken" });
     }
-    const projectId = parsed.data.project_id ?? null;
+    // 归属项目：PUT 时缺省 = 保留原项目（编辑提示词/周期不应把任务挪出
+    // 所属项目）；显式传 project_id（含 null）才改变归属。
+    const hasProjectKey = "project_id" in parsed.data && parsed.data.project_id !== undefined;
+    const projectId = hasProjectKey ? parsed.data.project_id ?? null : rec.project_id;
     if (projectId) {
       const v = manager.validateScheduleProject(req.userId, projectId);
       if (!v.ok) return reply.code(400).send({ error: "bad_project" });

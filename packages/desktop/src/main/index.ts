@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, shell, Notification } from "electron";
-import fs from "node:fs";
+import fs, { statSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { executeLocal } from "./executor";
-import { markAttachments, previewAttachment, saveAttachment } from "./attachments";
+import { isAttachmentPath, isMarkedAttachment, markAttachments, previewAttachment, saveAttachment } from "./attachments";
 import { ExportChatRequest, RelayConfigure, type ExportChatResult } from "@blm/protocol";
 import { relayClient } from "./relay";
 import {
@@ -259,6 +259,46 @@ app.whenReady().then(() => {
         args.session_id,
         args.paths.filter((p): p is string => typeof p === "string"),
       );
+    },
+  );
+
+  // 共享会话附件上传的第一跳：读待发附件的字节给渲染层（它拿 JWT 走 REST
+  // 上传到服务端）。只放行附件目录内或本会话已标记的路径——用户主动附件
+  // 才可读，与 read_attachment 的豁免同一口径；上限与 read_attachment 一致。
+  ipcMain.handle(
+    "blm:attachments:read-bytes",
+    (_e, args: { session_id: string; path: string }) => {
+      if (!args || typeof args.path !== "string") {
+        return { error: "参数不完整" };
+      }
+      const abs = path.resolve(args.path);
+      // 放行面：附件目录内 / 本会话已标记 / 系统临时目录。前两者是
+      // "用户主动附件"的常规落点；临时目录是截图/粘贴在 Windows 上经
+      // webUtils.getPathForFile 暴露的瞬时落点（跨机必读不到，必须上传成
+      // att: 引用）。temp 只服务"用户上传"这条 IPC，引擎 read_attachment
+      // 走另一条 fileOps 通道，不受此放行影响。
+      const inTemp =
+        (() => {
+          try {
+            const tmpRoot = app.getPath("temp");
+            const rel = path.relative(tmpRoot, abs);
+            return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+          } catch {
+            return false;
+          }
+        })();
+      if (!isAttachmentPath(abs) && !isMarkedAttachment(args.session_id, abs) && !inTemp) {
+        return { error: "只允许读取附件目录或本会话已标记的附件" };
+      }
+      try {
+        const st = statSync(abs);
+        if (!st.isFile()) return { error: "不是文件" };
+        if (st.size > 10 * 1024 * 1024) return { error: "附件过大（上限 10MB）" };
+        const buf = readFileSync(abs);
+        return { base64: buf.toString("base64"), name: path.basename(abs), size: st.size };
+      } catch (e) {
+        return { error: `读取失败：${(e as Error).message}` };
+      }
     },
   );
 

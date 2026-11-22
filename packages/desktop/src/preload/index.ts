@@ -137,6 +137,12 @@ contextBridge.exposeInMainWorld("blm", {
     ipcRenderer.invoke("blm:attachments:preview", { path }),
   markAttachments: (sessionId: string, paths: string[]): Promise<void> =>
     ipcRenderer.invoke("blm:attachments:mark", { session_id: sessionId, paths }),
+  // 共享会话附件上传的第一跳：读本会话已标记附件（或附件目录内文件）的字节。
+  readAttachmentBytes: (
+    sessionId: string,
+    path: string,
+  ): Promise<{ base64?: string; name?: string; size?: number; error?: string }> =>
+    ipcRenderer.invoke("blm:attachments:read-bytes", { session_id: sessionId, path }),
   // 会话导出：渲染层拼好 Markdown，主进程弹原生保存框并写盘。
   exportChat: (
     req: { default_filename: string; markdown: string },

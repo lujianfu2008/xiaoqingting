@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ProjectMeta, WorkflowStage } from "@blm/protocol";
+import type { ProjectMeta, ScheduleView, WorkflowStage } from "@blm/protocol";
 import { useStore } from "../../store";
 import { useT } from "../../i18n";
 import { Overlay } from "../Overlay";
@@ -49,6 +49,8 @@ export function ProjectSettingsDialog({
   const [wfBusy, setWfBusy] = useState(false);
   // 定时任务项目：内联新建表单开关。
   const [schedAdding, setSchedAdding] = useState(false);
+  // 正在编辑的定时任务（✎ 置位；替换成 ScheduleForm 编辑保存）。
+  const [editingSched, setEditingSched] = useState<ScheduleView | null>(null);
   const t = useT();
 
   const canEditDesc = !isPublic || role === "admin";
@@ -215,7 +217,15 @@ export function ProjectSettingsDialog({
               {projSchedules.length === 0 && !schedAdding && (
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>{t("sc.empty")}</div>
               )}
-              {projSchedules.map((rec) => (
+              {projSchedules.map((rec) =>
+                editingSched?.schedule_id === rec.schedule_id ? (
+                  <ScheduleForm
+                    key={rec.schedule_id}
+                    initial={rec}
+                    projectPreset={{ project_id: project.project_id, agentId: project.agent_id }}
+                    onDone={() => setEditingSched(null)}
+                  />
+                ) : (
                 <div
                   key={rec.schedule_id}
                   style={{
@@ -254,6 +264,13 @@ export function ProjectSettingsDialog({
                         {t("sc.openSession")}
                       </button>
                     )}
+                    <button
+                      style={{ fontSize: 11, padding: "1px 8px" }}
+                      title={t("sc.edit")}
+                      onClick={() => setEditingSched(rec)}
+                    >
+                      ✎
+                    </button>
                     <button className="del" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => doRemove(rec)}>
                       {t("sc.delete")}
                     </button>
@@ -264,7 +281,8 @@ export function ProjectSettingsDialog({
                       : t("sc.neverRun")}
                   </div>
                 </div>
-              ))}
+                ),
+              )}
               {schedAdding ? (
                 <ScheduleForm
                   initial={null}

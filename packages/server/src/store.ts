@@ -153,6 +153,9 @@ export class Store {
     for (const p of [this.sessionPath(id), this.historyPath(id)]) {
       fs.rmSync(p, { force: true });
     }
+    // 共享会话附件托管目录随会话一并清理（attachments/<sessionId>/）。
+    const attDir = path.join(config.dataDir, "attachments", id.replace(/[^A-Za-z0-9_-]/g, "_"));
+    fs.rmSync(attDir, { recursive: true, force: true });
   }
 
   // ---------- projects ----------

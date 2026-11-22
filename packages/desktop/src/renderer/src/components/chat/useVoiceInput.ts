@@ -138,7 +138,7 @@ export function useVoiceInput(
       // send 失败（断线等）同样把文本放回草稿，不蒸发。
       if (!currentSessionId) {
         setVoiceMsg(t("chat.noSession"));
-      } else if (!send(text)) {
+      } else if (!(await send(text))) {
         appendDraft(text);
       }
     } catch (e) {
