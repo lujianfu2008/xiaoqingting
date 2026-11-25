@@ -163,6 +163,9 @@ export interface BlmState {
   autoRead: boolean;
   // 后台完成通知（回合完成/审批请求的系统通知；设置 → 常规可关）。
   notifyEnabled: boolean;
+  /** 发送失败自动重试次数（0 = 关闭 = 失败即退回输入框）。localStorage
+   *  持久化（blm.sendRetryCount），仅前端行为，不涉及服务端协议。 */
+  sendRetryCount: number;
   voiceSettings: VoiceSettings;
   speaking: boolean; // TTS is currently reading aloud
   recording: boolean; // microphone is recording (voice input)
@@ -370,6 +373,8 @@ export interface BlmState {
   setAutoRead(on: boolean): void;
   /** 后台完成通知开关（localStorage 持久化，默认开）。 */
   setNotifyEnabled(on: boolean): void;
+  /** 发送失败自动重试次数（localStorage 持久化；0 = 关闭，失败即退回输入框）。 */
+  setSendRetryCount(n: number): void;
   setRecording(on: boolean): void;
   /** 添加待发附件（进当前会话的附件列表）。 */
   addAttachments(items: SessionAttachment[]): void;

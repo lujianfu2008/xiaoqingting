@@ -179,9 +179,10 @@ export function createChatActions(
         busy: { ...s.busy, [sid]: true },
         attachments: { ...s.attachments, [sid]: [] },
       }));
-      // 服务端回显 user_text 块即送达确认；超时/断线则提示并把文本放回
-      // 该会话的草稿（附件同理放回该会话）。超时只复位「没有其它在途
-      // 发送」的 busy：补充消息连发时，别的消息确认到了就说明链路
+      // 服务端回显 user_text 块即送达确认；超时/断线则按重试预算自动重发
+      // （同一 client_msg_id，服务端幂等，绝不双跑），预算耗尽才提示并把
+      // 文本放回该会话的草稿（附件同理放回该会话）。超时只复位「没有其它
+      // 在途发送」的 busy：补充消息连发时，别的消息确认到了就说明链路
       // 正常、回复会接上。
       armSendAck(clientMsgId, sid, outgoing, () => {
         set((s) => ({

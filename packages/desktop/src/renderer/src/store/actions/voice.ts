@@ -1,6 +1,7 @@
 import type { BlmState, GetState, SetState } from "../types";
 import { stopAudio, playSpoken } from "../../speech";
 import { LS } from "../persist";
+import { setSendRetries } from "../socket";
 
 let exprTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -11,6 +12,7 @@ export function createVoiceActions(
   BlmState,
   | "setAutoRead"
   | "setNotifyEnabled"
+  | "setSendRetryCount"
   | "updateVoiceSettings"
   | "setWakeError"
   | "setContinuousVoice"
@@ -33,6 +35,15 @@ export function createVoiceActions(
     setNotifyEnabled(on) {
       set({ notifyEnabled: on });
       localStorage.setItem(LS.notifyEnabled, on ? "1" : "0");
+    },
+
+    setSendRetryCount(n) {
+      const v = Math.max(0, Math.min(5, Math.trunc(n)));
+      set({ sendRetryCount: v });
+      localStorage.setItem(LS.sendRetryCount, String(v));
+      // socket.ts 的重发预算读的是模块级变量，改设置即时生效（在途消息以
+      // 记账时的预算结算，改完不影响已发那条）。
+      setSendRetries(v);
     },
 
     updateVoiceSettings(patch) {

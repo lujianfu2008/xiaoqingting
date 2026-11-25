@@ -14,7 +14,8 @@ import {
   stopHeartbeat,
   markSocketAlive,
   isActiveSocket,
-  failPendingAcks,
+  suspendAcks,
+  resumeAcks,
 } from "../socket";
 import { handleMessage } from "../messages";
 import { t } from "../../i18n";
@@ -64,8 +65,10 @@ export function createConnectionActions(
           });
           return;
         }
-        // 非正常断开：在途消息即刻判定失败（提示 + 文本放回输入框），不等超时。
-        failPendingAcks();
+        // 非正常断开：在途消息不判死——暂停计时（也留着触发 onFail 的资格），
+        // 等重连成功后统一用同一 client_msg_id 重发（服务端按 id 幂等，绝不
+        // 双跑）。重连由 onLinkDead 下面的既有定时器驱动。
+        suspendAcks();
         const delay = nextReconnectDelay();
         setReconnectTimer(setTimeout(() => get().connect(), delay));
       };
@@ -82,6 +85,11 @@ export function createConnectionActions(
           transientError: null,
         });
         startHeartbeat(ws, () => onLinkDead(4000, "heartbeat_timeout"));
+        // 重连后统一重发断线期间尚未确认的消息（同一 client_msg_id，服务端
+        // 幂等去重，绝不双跑）。先于 refreshOpenSessions 生效：回显按 id 幂等
+        // 合并进本地历史，重拉历史与回显到达之间的竞态由客户端 user_text
+        // 去重兜底（见 messages.ts）。
+        resumeAcks();
         // 网络中继：把 serverUrl+JWT 下发给 main 进程（token 只存 main 内存，
         // 绝不写盘）。失败静默——中继是增强能力，不影响聊天主链路。
         void window.blm

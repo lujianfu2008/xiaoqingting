@@ -44,6 +44,8 @@ export const LS = {
   loginHistory: "blm.loginHistory",
   // 显示诊断：允许在管理员请求时附整窗截图（缺省 = 允许）。
   diagAllowScreenshot: "blm.diagAllowScreenshot",
+  // 发送失败自动重试次数（网络问题重发；0 = 关闭，失败即退回输入框）。
+  sendRetryCount: "blm.sendRetryCount",
 } as const;
 
 /** 登录历史（登录屏快捷选择）。坏数据一律当空。 */

@@ -22,6 +22,8 @@ export function GeneralPanel(): React.JSX.Element {
   const setAvatarVisible = useStore((s) => s.setAvatarVisible);
   const notifyEnabled = useStore((s) => s.notifyEnabled);
   const setNotifyEnabled = useStore((s) => s.setNotifyEnabled);
+  const sendRetryCount = useStore((s) => s.sendRetryCount);
+  const setSendRetryCount = useStore((s) => s.setSendRetryCount);
   const viewerAutoOpen = useStore((s) => s.viewerAutoOpen);
   const setViewerAutoOpen = useStore((s) => s.setViewerAutoOpen);
   const diagAllowScreenshot = useStore((s) => s.diagAllowScreenshot);
@@ -260,6 +262,24 @@ export function GeneralPanel(): React.JSX.Element {
         </label>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
           {t("gen.notifyHint")}
+        </div>
+      </div>
+
+      <div className="field">
+        <label>{t("gen.sendRetry")}</label>
+        <select
+          value={sendRetryCount}
+          onChange={(e) => setSendRetryCount(Number(e.target.value))}
+        >
+          <option value={0}>{t("gen.sendRetryOff")}</option>
+          {[1, 2, 3, 5].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {t("gen.sendRetryHint")}
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import type { ServerMessage } from "@blm/protocol";
+import type { Block, ServerMessage } from "@blm/protocol";
 import { normalizeExpr } from "../components/DragonflyLogo";
 import { autoExecIfTrusted } from "./actions/chat";
 import { clearSendAck, clearSendAckByText, pendingAcksForSession, sendExecResult, sendJson, socketOpen } from "./socket";
@@ -31,6 +31,25 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
         else clearSendAckByText(msg.session_id, msg.block.text);
         // 记回合开始（后台完成通知用；已在记的回合不重复记）。
         armTurn(msg.session_id);
+      }
+      if (msg.block.kind === "user_text" && msg.block.client_msg_id) {
+        // 同 id 回显只认第一条（自动重发/断线重发时服务端幂等回显同一条）。
+        // 已存在则整表替换（服务端权威），不追加——避免「同一发消息」
+        // 因重连竞态在历史里出现两次。
+        const cid = msg.block.client_msg_id;
+        const sid = msg.session_id;
+        const existing = (get().blocksBySession[sid] ?? []).some((b) => userTextIdOf(b) === cid);
+        if (existing) {
+          set((s) => ({
+            blocksBySession: {
+              ...s.blocksBySession,
+              [sid]: (s.blocksBySession[sid] ?? []).map((b) =>
+                userTextIdOf(b) === cid ? msg.block : b,
+              ),
+            },
+          }));
+          break;
+        }
       }
       set((s) => ({
         blocksBySession: {
@@ -405,6 +424,11 @@ function toastForTask(
     if (mine) return t("task.assignedStageToast", { title, stage: mine.name });
   }
   return null;
+}
+
+/** 各块里取的送达确认 id（仅 user_text 有；其它块统一返回 undefined）。 */
+function userTextIdOf(b: Block): string | undefined {
+  return b.kind === "user_text" ? b.client_msg_id : undefined;
 }
 
 export type { BlmState };

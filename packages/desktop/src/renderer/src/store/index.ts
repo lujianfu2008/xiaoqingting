@@ -3,6 +3,7 @@ import type { AgentInfo } from "@blm/protocol";
 import type { BlmState } from "./types";
 import { LS, loadAvatarVisible, loadVoiceSettings } from "./persist";
 import { apiBase } from "./http";
+import { setSendRetries } from "./socket";
 import { createAuthActions } from "./actions/auth";
 import { createConnectionActions } from "./actions/connection";
 import { createSessionActions } from "./actions/sessions";
@@ -67,6 +68,13 @@ export const useStore = create<BlmState>((set, get) => ({
   trustMode: localStorage.getItem(LS.trustMode) === "1",
   autoRead: localStorage.getItem(LS.autoRead) === "1",
   notifyEnabled: localStorage.getItem(LS.notifyEnabled) !== "0",
+  // 发送失败自动重试：缺省 2 次（bad/±0 存档兜底 0 = 关闭）；解析失败当 0。
+  sendRetryCount: (() => {
+    const raw = Number(localStorage.getItem(LS.sendRetryCount));
+    const v = Number.isFinite(raw) && raw >= 0 && raw <= 5 ? Math.trunc(raw) : 2;
+    setSendRetries(v); // socket.ts 的重发预算与设置保持一致
+    return v;
+  })(),
   speaking: false,
   recording: false,
   recWake: false,

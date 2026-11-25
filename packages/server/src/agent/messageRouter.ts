@@ -16,6 +16,15 @@ export class MessageRouter {
   private store: Store;
   private conns: ConnectionRegistry;
   private sessions: Map<string, AgentSession>;
+  /** 最近收到的 user_message 确认 id → 时间戳。客户端网络抖动时自动重发同一条
+   *  消息（同一 client_msg_id），这里幂等：重复到达只补发确认回显，绝不重跑
+   *  引擎回合（否则一次抖动宕出两条回复）。键 = `${sessionId}:${clientMsgId}`，
+   *  id 是客户端 UUID 本就不撞，键再按会话隔离更稳；条目按最近 5 分钟滚动清理。 */
+  private recentMsgIds = new Map<string, number>();
+  private static readonly RECENT_MSG_TTL_MS = 5 * 60_000;
+  private recentMsgKey(sessionId: string, clientMsgId: string): string {
+    return `${sessionId}:${clientMsgId}`;
+  }
   /** sessionId → 最近一条用户消息的发送者。**仅用于中断权**：
    *  普通共享会话里提问的协作者能停掉自己发起的回合。执行面
    *  （本机执行）不跟随发言人——共享会话一律钉死会话主人，使用方
@@ -130,6 +139,29 @@ export class MessageRouter {
   handleUserMessage(userId: string, sessionId: string, text: string, clientMsgId?: string): void {
     const rec = this.checkAccess(userId, sessionId);
     if (!rec) return;
+
+    // 幂等护栏：带 client_msg_id 的 client（现代客户端都带）若同 id 刚来过
+    // （自动重发/断线重连重发），只补发确认回显，不追加历史、不重跑引擎
+    // ——否则一次网络抖动会把同一条消息撞出两条回复。TTL 内滚动清理。
+    if (clientMsgId) {
+      const now = Date.now();
+      this.recentMsgIds.forEach((ts, id) => {
+        if (now - ts > MessageRouter.RECENT_MSG_TTL_MS) this.recentMsgIds.delete(id);
+      });
+      const key = this.recentMsgKey(sessionId, clientMsgId);
+      if (this.recentMsgIds.has(key)) {
+        // 重复到达只把确认回显补发给发送方本人（协作者在首次到达时已收到，
+        // 再发会让他们时间线上出现重复）。发送方客户端按 id 幂等合并（见
+        // messages.ts），绝不重复上屏。
+        this.conns.broadcast(userId, {
+          type: "message_block",
+          session_id: sessionId,
+          block: { kind: "user_text", text, client_msg_id: clientMsgId },
+        });
+        return;
+      }
+      this.recentMsgIds.set(key, now);
+    }
 
     // First user message becomes the session title.
     if (rec.title === "新对话") {

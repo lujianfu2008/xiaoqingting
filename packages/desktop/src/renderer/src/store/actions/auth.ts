@@ -7,6 +7,7 @@ import {
   resetReconnectAttempt,
   setClosedByUser,
   setSocket,
+  clearAllAcks,
 } from "../socket";
 import { t } from "../../i18n";
 
@@ -210,6 +211,8 @@ export function createAuthActions(
       setClosedByUser(true);
       resetReconnect();
       resetReconnectAttempt();
+      // 登出：解除所有在途消息的发送确认与定时器（界面已清空，无需再退回）。
+      clearAllAcks();
       currentSocket()?.close();
       setSocket(null);
       set({
