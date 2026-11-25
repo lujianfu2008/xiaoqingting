@@ -13,6 +13,11 @@
     "build:android": "npm run build -w @blm/desktop && cd packages/mobile-android && ./gradlew assembleDebug",
     "build:android-release": "npm run build -w @blm/desktop && cd packages/mobile-android && ./gradlew assembleRelease",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run typecheck && node scripts/e2e-shared-session.mjs",
+    "test:full": "npm run test && node scripts/e2e-mcp-tunnel.mjs",
+    "test:textsniff": "npm run typecheck && npx tsx scripts/test-textsniff.ts",
+    "test:user-delete": "npm run typecheck && npx tsx scripts/test-user-delete.mts",
+    "test:admin-delete-e2e": "node scripts/e2e-admin-delete.mjs",
     "setup": "node setup.js",
     "start:all": "start-all.bat"
   },

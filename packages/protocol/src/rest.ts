@@ -192,6 +192,15 @@ export type RoleUpdateRequest = z.infer<typeof RoleUpdateRequest>;
 export const DisabledUpdateRequest = z.object({ disabled: z.boolean() });
 export type DisabledUpdateRequest = z.infer<typeof DisabledUpdateRequest>;
 
+// 单条审计日志删除：按 时间戳+操作者+动作 三元组定位（JSONL 无行号指针）。
+// target 可能含特殊字符，不能入路径，只做内容匹配。
+export const AuditDeleteRequest = z.object({
+  ts: z.string(),
+  actor: z.string().min(1),
+  action: z.string().min(1),
+});
+export type AuditDeleteRequest = z.infer<typeof AuditDeleteRequest>;
+
 // 公有域服务端执行授权开关（仅管理员）。
 export const PublicExecToggleRequest = z.object({ enabled: z.boolean() });
 export type PublicExecToggleRequest = z.infer<typeof PublicExecToggleRequest>;
@@ -256,6 +265,8 @@ export const AUDIT_ACTIONS = [
   "user.enable",
   "user.reset_password",
   "user.kick",
+  // 删除用户账号（管理动作，留下痕迹供回溯）。
+  "user.delete",
   "review.approve",
   "review.reject",
   // 全局 MCP 服务器配置变更（管理员）。
@@ -276,6 +287,16 @@ export const AUDIT_ACTIONS = [
   "public.exec_auth_change",
   // 显示诊断采集（管理员发起，客户端自愿回传）。
   "diag.collect",
+  // 用户侧会话动作（多用户可见度操作，出问题可回溯）。
+  // target = session_id；detail 带 owner/shared_with 摘要，绝不含密码。
+  "session.share",
+  "session.unshare",
+  "session.delete",
+  "session.rename",
+  "session.export",
+  // 审计日志删除（单条或清空，仅管理员）。
+  "audit.delete",
+  "audit.clear",
 ] as const;
 
 export const AuditEntry = z.object({

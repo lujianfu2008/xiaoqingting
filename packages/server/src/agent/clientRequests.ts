@@ -1,6 +1,6 @@
 import type { AttachmentImage, ServerMessage } from "@blm/protocol";
 import { config } from "../config.js";
-import { sanitizeToolName } from "./mcp.js";
+import { sanitizeToolName, toolServerOf } from "./mcp.js";
 import type { ExecSink } from "./clientTools/index.js";
 import { PendingMap } from "./pending.js";
 
@@ -58,11 +58,14 @@ export class ClientRequests {
     agent?: { agent_id: string; agent_name: string },
   ): Promise<{ behavior: "allow" } | { behavior: "deny"; message: string }> {
     const requestId = this.pendingPermissions.nextId();
+    const server = toolServerOf(toolName);
     this.events.send({
       type: "permission_request",
       request_id: requestId,
       session_id: this.sessionId,
       tool_name: sanitizeToolName(toolName),
+      // 外部 MCP 工具的服务器归属（弹窗区分不同服务器的同名工具）。
+      ...(server ? { tool_server: server } : {}),
       input,
       ...(agent ?? {}),
     });

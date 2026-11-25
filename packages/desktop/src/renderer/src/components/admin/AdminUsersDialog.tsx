@@ -24,11 +24,15 @@ export function AdminUsersDialog({
   const decideReviewUser = useStore((s) => s.decideReviewUser);
   const resetUserPassword = useStore((s) => s.resetUserPassword);
   const kickUser = useStore((s) => s.kickUser);
+  const deleteAdminUser = useStore((s) => s.deleteAdminUser);
   const loadAuditLog = useStore((s) => s.loadAuditLog);
+  const deleteAuditEntry = useStore((s) => s.deleteAuditEntry);
+  const clearAuditLog = useStore((s) => s.clearAuditLog);
   const auditLog = useStore((s) => s.auditLog);
   const username = useStore((s) => s.username);
   const [users, setUsers] = useState<AdminUserDetail[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   // manage 模式的小 tab：用户列表 / 操作日志（审计）/ 网络中继（仅管理员）。
   const [tab, setTab] = useState<"users" | "audit" | "relay" | "diag">("users");
   // 行内重置密码：正在改的用户名 + 输入中的新密码（Electron 无 window.prompt）。
@@ -64,6 +68,32 @@ export function AdminUsersDialog({
       setPwInput("");
       refresh();
     });
+  };
+
+  // 删除账号：行内二次确认（Electron 无 window.confirm，用内联确认态）。
+  const doDeleteUser = (u: AdminUserDetail): void => {
+    setBusy(u.username);
+    void deleteAdminUser(u.username).then((err) => {
+      setBusy(null);
+      setConfirmDelete(null);
+      if (err === "user_has_active_tasks_or_schedules") {
+        void listAdminUsers(); // 刷新在线态
+        return;
+      }
+      refresh();
+    });
+  };
+
+  const doDeleteAudit = async (e: AuditEntry): Promise<void> => {
+    setBusy(`audit-${e.ts}`);
+    const ok = await deleteAuditEntry(e.ts, e.actor, e.action);
+    setBusy(null);
+    if (!ok) void loadAuditLog();
+  };
+
+  const doClearAudit = (): void => {
+    setBusy("audit-clear");
+    void clearAuditLog().then(() => setBusy(null));
   };
 
   // 待审核排最前，其次已拒绝，正常账号最后。
@@ -103,6 +133,9 @@ export function AdminUsersDialog({
       "workflow.global_save": t("au.act.workflowSave"),
       "workflow.global_delete": t("au.act.workflowDelete"),
       "diag.collect": t("dg.tab"),
+      "user.delete": t("au.act.userDelete"),
+      "audit.delete": t("au.act.auditDelete"),
+      "audit.clear": t("au.act.auditClear"),
     };
     return map[action] ?? action;
   };
@@ -158,7 +191,18 @@ export function AdminUsersDialog({
           </div>
         ) : tab === "audit" ? (
           <>
-            <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 8px 6px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, padding: "0 8px 6px" }}>
+              <button
+                disabled={busy === "audit-clear" || auditLog.length === 0}
+                style={{ fontSize: 11, padding: "2px 8px" }}
+                title={t("au.auditClear")}
+                onClick={() => {
+                  if (!window.confirm(t("au.auditClearConfirm"))) return;
+                  doClearAudit();
+                }}
+              >
+                {t("au.auditClear")}
+              </button>
               <button
                 style={{ fontSize: 11, padding: "2px 8px" }}
                 onClick={() => void loadAuditLog()}
@@ -223,6 +267,14 @@ export function AdminUsersDialog({
                     >
                       {short}
                     </span>
+                    <button
+                      disabled={busy === `audit-${e.ts}`}
+                      title={t("au.auditDelete")}
+                      style={{ fontSize: 11, padding: "1px 6px", flexShrink: 0 }}
+                      onClick={() => void doDeleteAudit(e)}
+                    >
+                      ✕
+                    </button>
                   </div>
                 );
               })}
@@ -431,6 +483,16 @@ export function AdminUsersDialog({
                             }}
                           >
                             {t("au.resetPw")}
+                          </button>
+                          <button
+                            style={{ fontSize: 11, padding: "2px 6px", color: "var(--danger, #e5534b)" }}
+                            disabled={busy === u.username}
+                            onClick={() => {
+                              if (!window.confirm(t("au.deleteUserConfirm", { u: u.username }))) return;
+                              doDeleteUser(u);
+                            }}
+                          >
+                            {t("au.deleteUser")}
                           </button>
                         </>
                       )}

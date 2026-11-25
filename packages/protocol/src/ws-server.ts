@@ -24,6 +24,8 @@ export const WsPermissionRequest = z.object({
   request_id: z.string(),
   session_id: z.string(),
   tool_name: z.string(),
+  // 外部 MCP 服务器工具：所属服务器名（请求来源可追溯，弹窗区分同名工具）。
+  tool_server: z.string().optional(),
   input: z.unknown(),
   // 请求来源是子代理时带上（客户端弹窗标注「子代理 xx 请求使用 …」）
   agent_id: z.string().optional(),
@@ -91,6 +93,14 @@ export const WsSessionCreated = z.object({
 });
 
 export const WsPong = z.object({ type: z.literal("pong") });
+
+// 会话共享被取消 / 共享会话被主人删除：推给原共享可见的在线用户，
+// 客户端据此从 sharedSessions 摘除（正在查看则关闭共享视图回落）。
+export const WsSessionUnshared = z.object({
+  type: z.literal("session_unshared"),
+  session_id: z.string(),
+});
+export type WsSessionUnshared = z.infer<typeof WsSessionUnshared>;
 
 // 服务端权威的回合忙闲状态：忙闲翻转时推给主人与共享可见用户，
 // 连接建立时对在跑会话补推。共享会话的引擎由别人驱动时，协作者
@@ -165,6 +175,7 @@ export const ServerMessage = z.discriminatedUnion("type", [
   WsError,
   WsHistoryTruncated,
   WsSessionCreated,
+  WsSessionUnshared,
   WsPresence,
   WsPong,
   WsTurnState,

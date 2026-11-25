@@ -428,6 +428,13 @@ export function listUserSkills(username: string): SkillInfo[] {
   return dir ? listIn(dir, "user") : [];
 }
 
+/** 删除用户时整目录清掉其用户级技能库（含启用标记与配置）。 */
+export function deleteUserSkillDir(username: string): void {
+  const dir = userDir(username);
+  if (!dir) return;
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // ---------- 会话接入 ----------
 
 export interface SkillSessionSetup {

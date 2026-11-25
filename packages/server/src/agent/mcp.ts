@@ -104,3 +104,21 @@ export function sanitizeToolName(raw: string): string {
   const last = raw.includes("__") ? raw.split("__").pop()! : raw;
   return toolNameMap[last] ?? last.toLowerCase();
 }
+
+/**
+ * 引擎原始工具名（mcp__<server>__<tool>）解析出所属服务器名。原生/内置/
+ * 客户端代理工具无 mcp__ 前缀时返回 undefined。展示层用它给权限弹窗和
+ * 工具块标注来源，区分不同服务器上的同名工具。
+ * 引擎的服务器名可能本身含 __（mcp__a__b__tool 时 server = "a__b"）。
+ * 切分规则：去掉 "mcp__" 前缀后按「最后一个 __」切——最后一段是 tool，
+ * 前面全部是 server。这样与 sanitizeToolName（取最后一段做 tool）一致，
+ * 且 server 空（mcp____tool）与 tool 空（mcp__server__）都能正确处理。
+ */
+export function toolServerOf(raw: string): string | undefined {
+  if (!raw.startsWith("mcp__")) return undefined;
+  const body = raw.slice(5); // 去掉 "mcp__"
+  const lastSep = body.lastIndexOf("__");
+  if (lastSep === -1) return undefined; // 没有分隔，无法解析
+  const server = body.slice(0, lastSep);
+  return server || undefined; // server 为空（mcp____tool）视作无归属
+}

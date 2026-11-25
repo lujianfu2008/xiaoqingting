@@ -92,6 +92,36 @@ export function readDiagEntry(id: string): DiagStored | null {
   }
 }
 
+/** 删除一条诊断存档。返回是否存在。 */
+export function deleteDiagEntry(id: string): boolean {
+  if (!/^[a-zA-Z0-9-]+$/.test(id)) return false;
+  try {
+    fs.rmSync(path.join(diagDir(), `${id}.json`));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 删除某用户的全部诊断存档（用户删除时级联）。 */
+export function deleteDiagEntriesFor(username: string): void {
+  const dir = diagDir();
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return;
+  }
+  for (const f of files) {
+    try {
+      const e = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as DiagStored;
+      if (e.username === username) fs.rmSync(path.join(dir, f));
+    } catch {
+      // corrupt entry — leave it
+    }
+  }
+}
+
 let diagSeq = 0;
 
 /** 诊断请求 id：时间前缀（兼作存档排序键）+ 序号 + 随机尾。 */

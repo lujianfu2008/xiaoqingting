@@ -682,6 +682,8 @@ export function SessionList({
   const sessions = useStore((s) => s.sessions);
   const projects = useStore((s) => s.projects);
   const sharedSessions = useStore((s) => s.sharedSessions);
+  const loadShared = useStore((s) => s.loadShared);
+  const username = useStore((s) => s.username);
   const tasks = useStore((s) => s.tasks);
   const schedules = useStore((s) => s.schedules);
   const loadSchedules = useStore((s) => s.loadSchedules);
@@ -1071,26 +1073,49 @@ export function SessionList({
         </div>
       )}
 
-      {visibleShared.length > 0 && (
-        <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", padding: "0 8px" }}>
-          {t("sess.sharedHeader")}
+      {/* 共享会话区（只读）：常态自动出现（服务端增量推送），此处刷新按钮
+          作为兜底——网络抖动/断线窗口错过变更时手动补齐。
+          搜索时无命中则整区隐藏（避免空 header 噪音），刷新入口在非搜索态常驻。 */}
+      {(!q || visibleShared.length > 0) && (
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", padding: "0 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>{t("sess.sharedHeader")}</span>
+          <button
+            title={t("sess.refreshShared")}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "var(--muted)", fontSize: 11, padding: "2px 4px", borderRadius: 4,
+            }}
+            onClick={() => void loadShared()}
+          >
+            ⟳
+          </button>
         </div>
       )}
       <div style={{ paddingLeft: 14 }}>
         {visibleShared.map((s) => {
           const online = s.owner ? (presence[s.owner] ?? s.owner_online ?? false) : false;
+          // 我的角色：设了 approvers 且含我 = 可代为审批；否则纯只读。
+          const iAmApprover = !!username && (s.approvers ?? []).includes(username);
           return (
             <div
               key={s.session_id}
               data-session-row={s.session_id}
               className={`session-item ${s.session_id === currentSessionId && sharedView ? "active" : ""}`}
-              title={t("sess.viewTip", { owner: s.owner ?? "", online: online ? t("chat.ownerOnline") : t("chat.ownerOffline") })}
+              title={`${t("sess.viewTip", { owner: s.owner ?? "", online: online ? t("chat.ownerOnline") : t("chat.ownerOffline") })}${iAmApprover ? " — " + t("sess.approverTip") : ""}`}
               onClick={() => void selectSharedSession(s.session_id)}
             >
               <SessionBusyDot sessionId={s.session_id} />
               <span className="title">
                 {s.owner} / {s.title}
               </span>
+              {iAmApprover && (
+                <span
+                  className="perm-badge perm-approver"
+                  title={t("sess.approverTip")}
+                >
+                  {t("sess.approver")}
+                </span>
+              )}
               <span
                 className={`status-dot ${online ? "ok" : "bad"}`}
                 title={online ? t("chat.ownerOnline") : t("chat.ownerOffline")}

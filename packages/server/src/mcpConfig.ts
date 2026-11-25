@@ -113,6 +113,14 @@ export function deleteUserServer(username: string, name: string): boolean {
   return true;
 }
 
+/** 删除用户时清除其全部用户级 MCP 配置（键从 mcp-users.json 移除）。 */
+export function deleteUserMcp(username: string): void {
+  const all = loadUserAll();
+  if (!(username in all)) return;
+  delete all[username];
+  saveUserAll(all);
+}
+
 export interface MergedMcp {
   servers: Record<string, McpServerDef>;
   /** 被用户同名配置覆盖的全局服务器名。 */

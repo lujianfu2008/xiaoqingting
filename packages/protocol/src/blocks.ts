@@ -24,6 +24,9 @@ export const ToolCallBlock = z.object({
   kind: z.literal("tool_call"),
   id: z.string(),
   tool_name: z.string(), // sanitized, e.g. "read_file"
+  // 来自外部 MCP 服务器时：所属服务器名（mcp__<server>__<tool> 里的 server）。
+  // 展示层用它区分不同服务器的同名工具；原生/内置工具无此字段。
+  tool_server: z.string().optional(),
   input: z.unknown(),
   // 多 agent 归属（可选）：块由哪个子代理产生。主线程的块不带这些字段，
   // 旧历史数据天然兼容。

@@ -18,9 +18,13 @@ export function PermissionDialog(): React.JSX.Element | null {
           {queue.length > 1 ? t("perm.queued", { n: queue.length - 1 }) : ""}
         </h2>
         <div style={{ color: "var(--muted)" }}>
-          {pending.agent_name
-            ? t("perm.agentDesc", { agent: pending.agent_name, tool: pending.tool_name })
-            : t("perm.desc", { tool: pending.tool_name })}
+          {pending.agent_name && pending.tool_server
+            ? t("perm.agentDescServer", { agent: pending.agent_name, server: pending.tool_server, tool: pending.tool_name })
+            : pending.agent_name
+              ? t("perm.agentDesc", { agent: pending.agent_name, tool: pending.tool_name })
+              : pending.tool_server
+                ? t("perm.descServer", { server: pending.tool_server, tool: pending.tool_name })
+                : t("perm.desc", { tool: pending.tool_name })}
         </div>
         <pre>{JSON.stringify(pending.input, null, 2)}</pre>
         <div className="actions">

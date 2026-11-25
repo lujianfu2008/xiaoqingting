@@ -114,6 +114,54 @@ export class Store {
     return out;
   }
 
+  /** 全部会话记录（跨用户）。删除用户级联用；普通查询请用 listSessions。 */
+  listAllSessions(): SessionRecord[] {
+    const dir = path.join(config.dataDir, "sessions");
+    if (!fs.existsSync(dir)) return [];
+    const out: SessionRecord[] = [];
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        out.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as SessionRecord);
+      } catch {
+        // skip corrupt records
+      }
+    }
+    return out;
+  }
+
+  /** 删除用户时净化其它用户会话里对它的引用：从 shared_with / approvers
+   *  中摘除（避免协作端列表指向已不存在的账号）。若列表就此清空，则整条
+   *  取消共享（避免"空列表=全员可见"把原本一对一分享意外变成公开）。
+   *  返回受影响会话数。 */
+  stripUserFromSharedSessions(username: string): number {
+    let changed = 0;
+    for (const rec of this.listAllSessions()) {
+      let dirty = false;
+      if (rec.shared_with?.includes(username)) {
+        rec.shared_with = rec.shared_with.filter((u) => u !== username);
+        if (rec.shared_with.length === 0) {
+          // 列表空 = 原分享对象只剩被删账号 → 整条取消共享，别让它
+          // 变成"空列表 = 全员可见"的意外公开。
+          delete rec.shared_with;
+          rec.shared = false;
+          delete rec.approvers;
+        }
+        dirty = true;
+      }
+      if (rec.shared && rec.approvers?.includes(username)) {
+        rec.approvers = rec.approvers.filter((u) => u !== username);
+        if (rec.approvers.length === 0) delete rec.approvers;
+        dirty = true;
+      }
+      if (dirty) {
+        this.saveSession(rec);
+        changed++;
+      }
+    }
+    return changed;
+  }
+
   /** Sessions other users have shared with this user (knowledge sharing). */
   listSharedSessions(excludeUserId: string): SessionMeta[] {
     const dir = path.join(config.dataDir, "sessions");
@@ -261,6 +309,22 @@ export class Store {
     return out;
   }
 
+  /** 全部项目记录（跨用户）。删除用户级联用。 */
+  listAllProjects(): ProjectRecord[] {
+    const dir = path.join(config.dataDir, "projects");
+    if (!fs.existsSync(dir)) return [];
+    const out: ProjectRecord[] = [];
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        out.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as ProjectRecord);
+      } catch {
+        // skip corrupt records
+      }
+    }
+    return out;
+  }
+
   /** Delete a project record and demote its sessions to the default space.
    *  Public projects also lose their server-side workspace. */
   deleteProject(id: string): void {
@@ -324,6 +388,28 @@ export class Store {
       return pa !== pb ? pa - pb : b.created_at.localeCompare(a.created_at);
     });
     return out;
+  }
+
+  /** 删除某用户的全部更新申请（未决申请随之消失；用户已不存在无需通知）。 */
+  deleteUpdateRequestsFor(requester: string): number {
+    const dir = path.join(config.dataDir, "update-requests");
+    if (!fs.existsSync(dir)) return 0;
+    let n = 0;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const rec = JSON.parse(
+          fs.readFileSync(path.join(dir, f), "utf8"),
+        ) as UpdateRequestRecord;
+        if (rec.requester === requester) {
+          fs.rmSync(path.join(dir, f), { force: true });
+          n++;
+        }
+      } catch {
+        // skip corrupt records
+      }
+    }
+    return n;
   }
 
   // ---------- 协作流任务线程（一任务一 JSON） ----------

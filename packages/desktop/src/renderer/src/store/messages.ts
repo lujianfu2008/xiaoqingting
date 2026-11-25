@@ -333,6 +333,24 @@ export function handleMessage(msg: ServerMessage, set: SetState, get: GetState):
       }
       break;
 
+    case "session_unshared":
+      // 主人取消共享 / 删除了共享会话：从共享列表摘除。会话数据对我不再
+      // 可读——共享 tab 一并关掉（正在查看的连同 sharedView 一起退），
+      // 免得留下一个点不进去的挂空 tab。closeTab 对未打开的 id 是 no-op。
+      set((s) => ({
+        sharedSessions: s.sharedSessions.filter((x) => x.session_id !== msg.session_id),
+      }));
+      // 只关共享 tab（自有会话 tab 同 id 不应被误关；这里字段隔离）。
+      if (get().openTabs.includes(msg.session_id)) {
+        get().closeTab(msg.session_id);
+        // closeTab 在关当前 tab 时已换焦点，但 sharedView 复位在 set 之外：
+        // 若被关的就是当前共享视图，须保证 sharedView 已为 false。
+        if (get().currentSessionId === msg.session_id) {
+          set({ sharedView: false });
+        }
+      }
+      break;
+
     case "review_request":
       // 新注册待审核（或上线补推）：更新角标数。
       set({ pendingReviewCount: msg.pending });

@@ -31,10 +31,14 @@ export function createAdminActions(
   | "decideReviewUser"
   | "resetUserPassword"
   | "kickUser"
+  | "deleteAdminUser"
   | "loadAuditLog"
+  | "deleteAuditEntry"
+  | "clearAuditLog"
   | "collectDiagFrom"
   | "loadDiagList"
   | "loadDiagDetail"
+  | "deleteDiagEntry"
   | "startDiagTask"
   | "loadDiagTaskList"
   | "loadDiagTaskDetail"
@@ -216,6 +220,68 @@ export function createAdminActions(
       }
     },
 
+    /** 删除用户账号（全量级联）。返回错误码字符串或 null（成功）。 */
+    async deleteAdminUser(username): Promise<string | null> {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(
+          `${apiBase(serverUrl)}/api/admin/users/${encodeURIComponent(username)}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (res.ok) return null;
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        const code = body.error ?? body.message ?? "fail";
+        if (code === "user_has_active_tasks_or_schedules") {
+          set({ error: t("au.deleteUserBlocked") });
+        } else if (code === "cannot_delete_self") {
+          set({ error: t("au.deleteSelf") });
+        }
+        return code;
+      } catch {
+        return "network";
+      }
+    },
+
+    /** 删除一条审计日志。返回是否成功。 */
+    async deleteAuditEntry(ts, actor, action) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/audit/delete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ ts, actor, action }),
+        });
+        if (!res.ok) return false;
+        set((s) => ({
+          auditLog: s.auditLog.filter(
+            (e) => !(e.ts === ts && e.actor === actor && e.action === action),
+          ),
+        }));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    /** 清空全部审计日志。返回是否成功。 */
+    async clearAuditLog() {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/audit/clear`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return false;
+        set({ auditLog: [] });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
     async loadAuditLog(limit = 100) {
       const { serverUrl, token } = get();
       try {
@@ -275,6 +341,22 @@ export function createAdminActions(
         return (await res.json()) as DiagDetailResponse;
       } catch {
         return null;
+      }
+    },
+
+    /** 删除一条诊断存档。返回是否成功。 */
+    async deleteDiagEntry(id) {
+      const { serverUrl, token } = get();
+      try {
+        const res = await fetch(`${apiBase(serverUrl)}/api/admin/diag/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return false;
+        set((s) => ({ diagList: s.diagList.filter((e) => e.id !== id) }));
+        return true;
+      } catch {
+        return false;
       }
     },
 

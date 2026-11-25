@@ -4,6 +4,7 @@ import {
   AdminUserDetail,
   AdminUsersResponse,
   AdminResetPasswordRequest,
+  AuditDeleteRequest,
   DiagCollectRequest,
   DiagDetailResponse,
   DiagListResponse,
@@ -14,7 +15,7 @@ import {
 } from "@blm/protocol";
 import type { AuditEntry } from "@blm/protocol";
 import type { AgentManager } from "../agent/AgentManager.js";
-import { appendAudit, readRecentAudit } from "../audit.js";
+import { appendAudit, readRecentAudit, deleteAuditEntry, clearAudit } from "../audit.js";
 import {
   DiagTaskStartRequest,
   DiagTaskStartResponse,
@@ -32,9 +33,10 @@ import {
   setDisabled,
   setStatus,
   resetPassword,
+  deleteUser as removeUserAccount,
 } from "../users.js";
 import { isPublicExecAuthorized, setPublicExecAuthorized } from "../publicExecAuth.js";
-import { listDiagEntries, readDiagEntry, nextDiagId } from "../diagStore.js";
+import { listDiagEntries, readDiagEntry, deleteDiagEntry, nextDiagId } from "../diagStore.js";
 
 // 管理员专用：用户管理（公有域管理员授权、审核员授权、账号禁用/启用）。
 // 注册审核端点（/api/review/*）对管理员和管理员授权的审核员（reviewer）开放。
@@ -160,6 +162,58 @@ export function registerAdminRoutes(app: FastifyInstance, manager: AgentManager)
     return { username, kicked: true };
   });
 
+  // 删除用户账号：先挡板（在途协作任务 / 启用定时任务），再全量级联清理。
+  // 不可删 bootstrap admin 与本人。级联包含会话/项目/定时/任务/技能/LLM/
+  // MCP/工作流/中继/公域授权/诊断/更新申请；users.json 在级联后移除。
+  app.delete("/api/admin/users/:username", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const username = (req.params as { username: string }).username;
+    if (!getUserRecord(username)) return reply.code(404).send({ error: "not_found" });
+    if (isBootstrapAdmin(username)) {
+      return reply.code(400).send({ error: "immutable_account" });
+    }
+    if (username === req.userId) {
+      return reply.code(400).send({ error: "cannot_delete_self" });
+    }
+    if (manager.userDeletionBlocked(username)) {
+      return reply.code(409).send({ error: "user_has_active_tasks_or_schedules" });
+    }
+    manager.deleteUserAfterGuard(username);
+    const ok = removeUserAccount(username);
+    if (!ok) return reply.code(400).send({ error: "update_failed" });
+    appendAudit({ actor: req.userId, action: "user.delete", target: username });
+    return { ok: true };
+  });
+
+  // 审计日志：单条删除（按 ts+actor+action 三元组定位，重写 jsonl）。
+  app.post("/api/admin/audit/delete", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const parsed = AuditDeleteRequest.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!deleteAuditEntry(parsed.data)) return reply.code(404).send({ error: "not_found" });
+    appendAudit({
+      actor: req.userId,
+      action: "audit.delete",
+      target: parsed.data.actor,
+      detail: { at: parsed.data.ts, action: parsed.data.action },
+    });
+    return { ok: true };
+  });
+
+  // 审计日志：清空全部。
+  app.post("/api/admin/audit/clear", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const n = clearAudit();
+    // 清空后写一条（作为清空动作的凭据），否则这里删了不留痕。
+    appendAudit({
+      actor: req.userId,
+      action: "audit.clear",
+      target: "-",
+      detail: { deleted: n },
+    });
+    return { ok: true, deleted: n };
+  });
+
   // ---------- 显示诊断（仅管理员） ----------
 
   // 发起一次采集：目标用户须在线（WS 推 diag_request），
@@ -202,6 +256,14 @@ export function registerAdminRoutes(app: FastifyInstance, manager: AgentManager)
       screenshot: e.screenshot ?? null,
     };
     return body;
+  });
+
+  // 删除一条诊断存档。
+  app.delete("/api/admin/diag/:id", (req, reply) => {
+    if (!isPublicAdmin(req.userId)) return reply.code(403).send({ error: "forbidden" });
+    const id = (req.params as { id: string }).id;
+    if (!deleteDiagEntry(id)) return reply.code(404).send({ error: "not_found" });
+    return { ok: true };
   });
 
   // ---------- 远程诊断任务（借用在线客户端的智能体排障） ----------

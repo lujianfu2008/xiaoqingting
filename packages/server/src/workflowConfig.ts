@@ -168,6 +168,14 @@ export function deleteUserTemplate(username: string, name: string): boolean {
   return true;
 }
 
+/** 删除用户时清除其全部自定义工作流模板（键从用户层文件移除）。 */
+export function clearUserWorkflows(username: string): void {
+  const all = loadUserAll();
+  if (!(username in all)) return;
+  delete all[username];
+  saveUserAll(all);
+}
+
 // ---------- 合并视图与解析 ----------
 
 export interface MergedWorkflows {

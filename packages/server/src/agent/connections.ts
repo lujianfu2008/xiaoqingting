@@ -136,4 +136,58 @@ export class ConnectionRegistry {
       for (const conn of set) conn.send(msg);
     }
   }
+
+  /**
+   * 共享状态变更的可见用户广播（按变更前/后的 shared + shared_with 差分）：
+   *  - 新增可见者（关→开、或新列入 shared_with、或收窄改全员）：在线者收
+   *    createdMeta（session_created，客户端 upsert 进共享列表，零新增代码即显示）。
+   *  - 失去可见（取消共享、或被移出 shared_with、或主人删除会话）：在线者收
+   *    session_unshared（客户端摘除列表/关掉正在看的共享视图）。
+   *  会话主人自身经 REST 响应更新（不回推）；离线者下次登录经 /api/shared 补齐。
+   *  ownerId 不在差分集合内——主人永远是自己的会话，绝不能给自己回推
+   *  session_created/session_unshared（unshared 会让主人无辜关掉自己的 tab）。
+   * @param createdMeta 仅新增可见分支需要；删除场景（newShared=false）可不传。
+   */
+  broadcastSharedChange(
+    ownerId: string,
+    sessionId: string,
+    oldShared: boolean,
+    oldSharedWith: string[] | undefined,
+    newShared: boolean,
+    newSharedWith: string[] | undefined,
+    createdMeta?: ServerMessage,
+  ): void {
+    for (const uid of this.byUser.keys()) {
+      if (uid === ownerId) continue;
+      const wasVisible = oldShared && sharedBy(oldSharedWith, uid);
+      const isVisible = newShared && sharedBy(newSharedWith, uid);
+      if (!wasVisible && isVisible) {
+        if (createdMeta) this.broadcast(uid, createdMeta);
+      } else if (wasVisible && !isVisible) {
+        this.broadcast(uid, { type: "session_unshared", session_id: sessionId });
+      }
+    }
+  }
+
+  /**
+   * 共享会话的元数据更新（重命名只改标题/updated_at）：可见集合不变，
+   *  broadcastSharedChange 的差分不会触发。这里把最新 meta 广播给全体
+   *  当前在线可见者（不含主人——主人经 REST 响应更新），客户端同名
+   *  session_created 分支 upsert 进共享列表即刷新标题。
+   */
+  broadcastSharedMetaUpdate(
+    ownerId: string,
+    sessionId: string,
+    sharedWith: string[] | undefined,
+    meta: ServerMessage,
+  ): void {
+    for (const uid of this.byUser.keys()) {
+      if (uid === ownerId) continue;
+      if (sharedBy(sharedWith, uid)) this.broadcast(uid, meta);
+    }
+  }
+}
+
+function sharedBy(sharedWith: string[] | undefined, uid: string): boolean {
+  return !sharedWith || sharedWith.length === 0 || sharedWith.includes(uid);
 }

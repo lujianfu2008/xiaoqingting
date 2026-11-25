@@ -284,7 +284,7 @@ return (
 <div className="msg-wrap">
 <div className="tool-block">
 <AgentBadge block={block} />
-🔧 {block.tool_name}
+🔧 {block.tool_server ? `${block.tool_server} / ${block.tool_name}` : block.tool_name}
 {summary ? (
 <>
 {" — "}

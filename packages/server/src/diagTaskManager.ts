@@ -176,6 +176,25 @@ export class DiagTaskManager {
     return "ok";
   }
 
+  /** 删除用户账号时级联：清掉其名下全部诊断任务的记录与专属会话。 */
+  deleteForUser(username: string): void {
+    const all = this.loadAll();
+    const owned = Object.values(all).filter((e) => e.username === username);
+    if (owned.length === 0) return;
+    for (const e of owned) {
+      const timer = this.timers.get(e.task_id);
+      if (timer) {
+        clearTimeout(timer);
+        this.timers.delete(e.task_id);
+      }
+      delete all[e.task_id];
+    }
+    this.saveAll(all);
+    for (const e of owned) {
+      this.manager.deleteSession(e.username, e.session_id);
+    }
+  }
+
   list(): DiagTaskEntry[] {
     return Object.values(this.loadAll())
       .sort((a, b) => b.at.localeCompare(a.at))

@@ -9,7 +9,7 @@ import type {
   Usage,
 } from "@blm/protocol";
 import { config } from "../config.js";
-import { sanitizeToolName } from "./mcp.js";
+import { sanitizeToolName, toolServerOf } from "./mcp.js";
 import { subagentName } from "./subagents.js";
 import {
   LLM_AUTH_ERROR_MESSAGE,
@@ -135,10 +135,13 @@ export function handleSdkMessage(message: SDKMessage, sid: string, sink: Message
             } satisfies TaskListBlock);
             continue;
           }
+          const server = toolServerOf(part.name);
           blocks.push({
             kind: "tool_call",
             id: part.id,
             tool_name: sanitizeToolName(part.name),
+            // 外部 MCP 工具的服务器归属（区分不同服务器的同名工具）。
+            ...(server ? { tool_server: server } : {}),
             input: part.input,
             ...attrib,
           } satisfies ToolCallBlock);

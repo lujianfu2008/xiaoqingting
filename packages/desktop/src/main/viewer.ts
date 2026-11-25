@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
+import { readTextFile } from "./textSniff";
 import { uiStrings } from "./i18n";
 import { loadSettings } from "./settings";
 import { wireShellZoom } from "./menu";
@@ -218,79 +219,6 @@ export function registerViewerIpc(): void {
   });
 }
 
-// ---------- 文本嗅探与解码（BOM → utf8 → GBK → binary） ----------
-// GBK 兜底全平台启用：与 executor fileOps 的 win32-only 先例不同——
-// 那里是控制台管道编码问题，这里是文件内容本身（同事发来的 GBK 文档
-// 与平台无关）；Electron 全量 ICU 下 TextDecoder("gbk") 任何平台可用。
-
-async function readTextFile(p: string, maxBytes: number): Promise<ViewerReadResult> {
-  let st: fs.Stats;
-  try {
-    st = await fsp.stat(p);
-  } catch (e) {
-    return { kind: "error", error: `无法读取：${(e as Error).message}` };
-  }
-  if (st.isDirectory()) return { kind: "error", error: "这是一个目录" };
-  if (st.size === 0) return { kind: "empty" };
-  if (st.size > maxBytes) return { kind: "too_large", size: st.size, max_bytes: maxBytes };
-
-  let buf: Buffer;
-  try {
-    buf = await fsp.readFile(p);
-  } catch (e) {
-    return { kind: "error", error: `无法读取：${(e as Error).message}` };
-  }
-  // 长度取读到的实际字节数（TOCTOU 窗口里文件可能变大）。
-  const total = Math.min(buf.length, st.size);
-
-  // BOM 探测（确定性编码）。
-  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
-    return textResult(buf.toString("utf8").slice(1), "utf8", total, maxBytes);
-  }
-  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
-    return textResult(buf.toString("utf16le").slice(1), "utf16le", total, maxBytes);
-  }
-  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
-    // UTF-16BE 手工交换成 LE 再解。
-    const sw = Buffer.from(buf.subarray(2));
-    sw.swap16();
-    return textResult(sw.toString("utf16le"), "utf16le", total, maxBytes);
-  }
-
-  // 无 BOM：utf8 strict 试探（8KB 样本足够判定），NUL 占比超限
-  // 判二进制（NUL 是合法 utf8——纯零字节文件不能当文本展示），
-  // 其余 → GBK 全解，GBK 结果乱码占比仍高 → 判二进制。
-  const sample = buf.subarray(0, Math.min(buf.length, 8192));
-  let nuls = 0;
-  for (const b of sample) if (b === 0) nuls++;
-  if (nuls / Math.max(sample.length, 1) > 0.01) return { kind: "binary" };
-  try {
-    new TextDecoder("utf-8", { fatal: true }).decode(sample);
-    return textResult(buf.toString("utf8"), "utf8", total, maxBytes);
-  } catch {
-    // fall through to GBK
-  }
-  try {
-    const gbk = new TextDecoder("gbk").decode(buf);
-    const bad = (gbk.match(/\uFFFD/g) ?? []).length;
-    if (bad / Math.max(gbk.length, 1) <= 0.01) {
-      return textResult(gbk, "gbk", total, maxBytes);
-    }
-  } catch {
-    // 无 full-ICU 时 TextDecoder("gbk") 抛错 → binary
-  }
-  return { kind: "binary" };
-}
-
-function textResult(
-  text: string,
-  encoding: "utf8" | "utf16le" | "gbk",
-  totalBytes: number,
-  maxBytes: number,
-): ViewerReadResult {
-  // 按字符截断到字节预算内（上限余量防止单字符越界）。
-  const maxChars = Math.floor(maxBytes / 4);
-  const truncated = text.length > maxChars;
-  if (truncated) text = text.slice(0, maxChars);
-  return { kind: "text", text, encoding, truncated, total_bytes: totalBytes };
-}
+// ---------- 文本嗅探与解码 ----------
+// 逻辑已抽到纯模块 textSniff.ts（BOM → 整文件 utf8 strict → GBK →
+// binary），测试脚本直接导入该模块跑 sniff；viewer.ts 只留 IPC 外壳。

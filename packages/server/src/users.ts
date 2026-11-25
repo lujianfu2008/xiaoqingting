@@ -302,3 +302,15 @@ export function listAdminUsernames(): string[] {
   return [...names];
 }
 
+/** 从 users.json 移除账号（及其工号绑定）。bootstrap admin 不可删；
+ *  未知用户名返回 false。调用方负责级联清理其余数据面。 */
+export function deleteUser(username: string): boolean {
+  if (username === config.username) return false;
+  const users = loadUsers();
+  const idx = users.findIndex((u) => u.username === username);
+  if (idx < 0) return false;
+  users.splice(idx, 1);
+  saveUsers(users);
+  return true;
+}
+

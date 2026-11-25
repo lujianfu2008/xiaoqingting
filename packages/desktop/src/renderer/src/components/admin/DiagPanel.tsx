@@ -21,6 +21,7 @@ function LayoutBlock(): React.JSX.Element | null {
   const diagList = useStore((s) => s.diagList);
   const loadDiagList = useStore((s) => s.loadDiagList);
   const loadDiagDetail = useStore((s) => s.loadDiagDetail);
+  const deleteDiagEntry = useStore((s) => s.deleteDiagEntry);
   const t = useT();
 
   useEffect(() => {
@@ -34,6 +35,16 @@ function LayoutBlock(): React.JSX.Element | null {
     setLayout(d);
   };
 
+  const del = async (id: string): Promise<void> => {
+    if (!window.confirm(t("dg.deleteConfirm"))) return;
+    const ok = await deleteDiagEntry(id);
+    if (ok && sel === id) {
+      setSel(null);
+      setLayout(null);
+    }
+    void loadDiagList();
+  };
+
   const l = layout?.layout ?? null;
   const shot = layout?.screenshot ?? null;
 
@@ -45,27 +56,41 @@ function LayoutBlock(): React.JSX.Element | null {
         </div>
       )}
       {diagList.map((e: DiagEntryMeta) => (
-        <button
-          key={e.id}
-          style={{
-            textAlign: "left",
-            fontSize: 12,
-            border: sel === e.id ? "1px solid var(--primary)" : "1px solid var(--border)",
-            borderRadius: 8,
-            padding: "6px 8px",
-            background: "transparent",
-            color: "var(--text)",
-          }}
-          onClick={() => void open(e.id)}
-        >
-          <span style={{ fontWeight: 600 }}>{e.username}</span>
-          <span style={{ color: "var(--muted)", marginLeft: 8 }}>
-            {e.scope === "screenshot" ? t("dg.scopeShot") : t("dg.scopeLayout")}
-          </span>
-          <span style={{ color: "var(--muted)", float: "right" }}>
-            {new Date(e.at).toLocaleString()}
-          </span>
-        </button>
+        <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            style={{
+              flex: 1,
+              textAlign: "left",
+              fontSize: 12,
+              border: sel === e.id ? "1px solid var(--primary)" : "1px solid var(--border)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              background: "transparent",
+              color: "var(--text)",
+            }}
+            onClick={() => void open(e.id)}
+          >
+            <span style={{ fontWeight: 600 }}>{e.username}</span>
+            <span style={{ color: "var(--muted)", marginLeft: 8 }}>
+              {e.scope === "screenshot" ? t("dg.scopeShot") : t("dg.scopeLayout")}
+            </span>
+            <span style={{ color: "var(--muted)", float: "right" }}>
+              {new Date(e.at).toLocaleString()}
+            </span>
+          </button>
+          <button
+            title={t("dg.delete")}
+            style={{
+              fontSize: 11,
+              padding: "2px 6px",
+              color: "var(--danger, #e5534b)",
+              flexShrink: 0,
+            }}
+            onClick={() => void del(e.id)}
+          >
+            ✕
+          </button>
+        </div>
       ))}
       {l && (
         <div

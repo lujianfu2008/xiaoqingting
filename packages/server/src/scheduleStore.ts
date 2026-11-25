@@ -72,6 +72,16 @@ export function deleteSchedule(owner: string, id: string): boolean {
   return true;
 }
 
+/** 删除用户时级联删其全部定时任务（含专属会话引用，由调用方逐条收走）。 */
+export function deleteSchedulesForUser(owner: string): ScheduleRecord[] {
+  const all = loadAll();
+  const owned = Object.values(all).filter((r) => r.owner === owner);
+  if (owned.length === 0) return [];
+  for (const rec of owned) delete all[rec.schedule_id];
+  saveAll(all);
+  return owned;
+}
+
 /** 同 owner 内名称唯一（编辑时排除自身 id）。 */
 export function scheduleNameTaken(owner: string, name: string, excludeId?: string): boolean {
   return Object.values(loadAll()).some(

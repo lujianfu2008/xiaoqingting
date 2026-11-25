@@ -72,3 +72,46 @@ export function readRecentAudit(limit: number): AuditEntry[] {
     return []; // no audit file yet
   }
 }
+
+/** 全部条目读取（用于删除/清空，不去 tail 截断）。 */
+function readAllEntries(): AuditEntry[] {
+  const file = auditPath();
+  if (!fs.existsSync(file)) return [];
+  const out: AuditEntry[] = [];
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line) as AuditEntry);
+    } catch {
+      // skip malformed lines (kept positionally intact on rewrite)
+    }
+  }
+  return out;
+}
+
+/** 重写整个审计文件（保留坏行位置给定语义：坏行当作不可删的占位保留）。 */
+function rewriteAll(entries: AuditEntry[]): void {
+  const file = auditPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length > 0 ? "\n" : ""));
+}
+
+/** 按 ts+actor+action 精确匹配删除一条。返回是否删中（未命中 = false）。 */
+export function deleteAuditEntry(match: { ts: string; actor: string; action: string }): boolean {
+  const entries = readAllEntries();
+  const idx = entries.findIndex(
+    (e) => e.ts === match.ts && e.actor === match.actor && e.action === match.action,
+  );
+  if (idx < 0) return false;
+  entries.splice(idx, 1);
+  rewriteAll(entries);
+  return true;
+}
+
+/** 清空全部审计条目。返回删除的条数。 */
+export function clearAudit(): number {
+  const n = readAllEntries().length;
+  fs.mkdirSync(path.dirname(auditPath()), { recursive: true });
+  fs.writeFileSync(auditPath(), "");
+  return n;
+}

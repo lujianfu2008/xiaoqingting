@@ -254,8 +254,14 @@ export interface BlmState {
   resetUserPassword(username: string, password: string): Promise<boolean>;
   /** 管理员强制某在线用户下线（不禁用账号）。 */
   kickUser(username: string): Promise<boolean>;
+  /** 管理员删除用户账号（全量级联）。返回错误码字符串或 null（成功）。 */
+  deleteAdminUser(username: string): Promise<string | null>;
   /** 拉取最近的管理动作审计（仅管理员），成功后写入 auditLog。 */
   loadAuditLog(limit?: number): Promise<boolean>;
+  /** 删除一条审计日志。返回是否成功。 */
+  deleteAuditEntry(ts: string, actor: string, action: string): Promise<boolean>;
+  /** 清空全部审计日志。返回是否成功。 */
+  clearAuditLog(): Promise<boolean>;
   selectSession(id: string): Promise<void>;
   selectSharedSession(id: string): Promise<void>;
   /** 拉取一个会话的全量历史替换本地缓存（服务端为权威；失败保留缓存并报错）。 */
@@ -422,6 +428,8 @@ export interface BlmState {
   loadDiagDetail(
     id: string,
   ): Promise<DiagDetailResponse | null>;
+  /** 删除一条诊断存档。返回是否成功。 */
+  deleteDiagEntry(id: string): Promise<boolean>;
   // 远程诊断任务（管理员借用在线客户端的智能体排障）。
   diagTaskList: DiagTaskEntry[];
   /** 发起一个诊断任务。返回错误码（null = 已发起）。 */

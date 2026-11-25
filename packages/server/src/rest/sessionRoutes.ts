@@ -22,6 +22,7 @@ import {
   changePassword,
 } from "../users.js";
 import { searchUserSessions } from "./sessionSearch.js";
+import { appendAudit } from "../audit.js";
 
 // Identity, agents and session CRUD/sharing endpoints.
 
@@ -177,6 +178,15 @@ export function registerSessionRoutes(
   app.get("/api/sessions/:id/export", (req, reply) => {
     const history = manager.getHistory(req.userId, (req.params as { id: string }).id);
     if (!history) return reply.code(404).send({ error: "not_found" });
+    // 数据导出动作（知识共享场景的提取路径）：记录是谁导出了哪个会话。
+    // GET 幂等可重复触发，审计条数随导出次数增长——导出是明确的数据外带，
+    // 值得留痕（与「只看不记」的消息读取区分）。
+    appendAudit({
+      actor: req.userId,
+      action: "session.export",
+      target: history.session.session_id,
+      detail: { owner: history.session.owner ?? null },
+    });
     const md = blocksToMarkdown(history.session, history.blocks);
     // 标题里的非法文件名字符替换为 _（中文保留），空标题回退会话 id。
     // HTTP 头只允许 ISO-8859-1：ASCII 兜底名 + RFC 6266 的
@@ -201,7 +211,14 @@ export function registerSessionRoutes(
   app.delete("/api/sessions/:id", (req, reply) => {
     // 发起方（会话主人）随时可删；在途协作任务由服务端强制收尾为取消。
     const result = manager.deleteSession(req.userId, (req.params as { id: string }).id);
-    if (result.ok) return reply.code(204).send();
+    if (result.ok) {
+      appendAudit({
+        actor: req.userId,
+        action: "session.delete",
+        target: (req.params as { id: string }).id,
+      });
+      return reply.code(204).send();
+    }
     return reply.code(404).send({ error: "not_found" });
   });
 
@@ -235,6 +252,11 @@ export function registerSessionRoutes(
         .code(result.code === "forbidden" ? 403 : 404)
         .send({ error: result.code });
     }
+    appendAudit({
+      actor: req.userId,
+      action: "session.rename",
+      target: result.rec.session_id,
+    });
     return { session_id: result.rec.session_id, title: result.rec.title };
   });
 
@@ -247,6 +269,21 @@ export function registerSessionRoutes(
     const { shared, shared_with, approvers } = parsed.data;
     const rec = manager.setShared(req.userId, (req.params as { id: string }).id, shared, shared_with, approvers);
     if (!rec) return reply.code(404).send({ error: "not_found" });
+    // 用户侧审计：共享/取消共享是「会增加或剥夺他人可见度」的动作。
+    // detail 只记非敏感摘要（名单），绝不含密码/哈希。
+    appendAudit({
+      actor: req.userId,
+      action: shared ? "session.share" : "session.unshare",
+      target: rec.session_id,
+      detail: {
+        ...(shared
+          ? {
+              shared_with: rec.shared_with ?? [],
+              ...(rec.approvers?.length ? { approvers: rec.approvers } : {}),
+            }
+          : {}),
+      },
+    });
     return {
       session_id: rec.session_id,
       shared: rec.shared ?? false,

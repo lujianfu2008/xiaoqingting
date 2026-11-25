@@ -29,6 +29,10 @@ async function cleanupLeftovers(token0) {
 const log = (...a) => console.log("[e2e]", ...a);
 const die = (m) => { console.error("[e2e] FAIL:", m); process.exit(1); };
 
+// 服务端健康检查启动门（E2E 需 dev:server 已在 BASE 运行，未起给明确报错）。
+const health = await fetch(`${BASE}/health`).catch(() => null);
+if (!health?.ok) die(`服务端不可达，请先启动 dev:server（${BASE}/health 未返回 200）`);
+
 // ---------- 假 MCP 服务器（streamable-http 最小实现） ----------
 let upstreamHits = 0;
 const upstream = http.createServer((req, res) => {
